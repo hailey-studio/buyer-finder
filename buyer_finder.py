@@ -12,6 +12,7 @@ Step 2  draft_emails()     -> writes a personalised first email to the
 Every step also reports its usage, so the app can show what a run cost.
 """
 
+import html
 import json
 import os
 import re
@@ -21,7 +22,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 
 import anthropic
 
@@ -89,15 +91,22 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
     searches: int = 0
+    # Several threads add to the same counters at once, so updates go through a lock
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def add(self, response):
         u = getattr(response, "usage", None)
         if u is None:
             return
-        self.input_tokens += getattr(u, "input_tokens", 0) or 0
-        self.output_tokens += getattr(u, "output_tokens", 0) or 0
         tools = getattr(u, "server_tool_use", None)
-        self.searches += (getattr(tools, "web_search_requests", 0) or 0) if tools else 0
+        with self._lock:
+            self.input_tokens += getattr(u, "input_tokens", 0) or 0
+            self.output_tokens += getattr(u, "output_tokens", 0) or 0
+            self.searches += (getattr(tools, "web_search_requests", 0) or 0) if tools else 0
+
+    def add_search(self, count: int = 1):
+        with self._lock:
+            self.searches += count
 
     @property
     def cost(self) -> float:
@@ -128,10 +137,13 @@ For each company, give:
 - website (official site, or "" if not found)
 - city
 - type (importer / distributor / wholesaler / retailer / other)
-- what_they_sell (one sentence)
-- why_fit (one sentence, specific to this seller)
-- fit_score (a whole number from 1 to 5, 5 = best fit)
-- next_step (one short, practical tip for how to approach this company)
+- what_they_sell (one sentence, in {language})
+- why_fit (one sentence, specific to this seller, in {language})
+- next_step (one short, practical tip for how to approach this company, in {language})
+- sells_same_products (true/false: they already sell or distribute this kind of product)
+- trade_buyer (true/false: importer, distributor or wholesaler that buys in bulk, not only a shop)
+- serves_businesses (true/false: they sell to businesses such as manufacturers, installers or retailers)
+- imports_or_same_material (true/false: they already import, or sell products of the same material or quality)
 - source (the URL where you found it)
 - evidence (a short quote, at most 25 words, copied WORD FOR WORD from the source text,
   that shows this company sells or distributes this kind of product; "" if there is none)
@@ -140,10 +152,10 @@ Only include companies that BUY or DISTRIBUTE this kind of product. Leave out
 manufacturers and suppliers that would compete with the seller, B2B marketplaces
 (e.g. Alibaba, Made-in-China), directories and yellow pages, job sites and social media pages.
 
-Every company must have ALL the fields above. fit_score must be a whole number
-like 4 (not text, not "4/5"). Use different scores: not every company is a 5 or a 1.
+Every company must have ALL the fields above. Answer each true/false field from the
+evidence you have; if you are not sure, use false. The evidence stays in its original language.
 
-Return ONLY a JSON array inside <json></json> tags, sorted by fit_score, highest first."""
+Return ONLY a JSON array inside <json></json> tags."""
 
 # For DeepSeek: we search first (SerpAPI), then ask the model to pick buyers from the results.
 PICK_PROMPT = RESEARCH_PROMPT.replace(
@@ -192,6 +204,24 @@ def _extract_json(text: str):
     if not isinstance(data, list):
         raise ValueError("The agent did not return a list of companies. Please try again.")
     return [c for c in data if isinstance(c, dict)]
+
+
+# Fit score rubric: the model answers four yes/no questions, the code adds up the points.
+# The same answers always give the same score, and the app can show why.
+RUBRIC = (("sells_same_products", 2), ("trade_buyer", 1), ("serves_businesses", 1), ("imports_or_same_material", 1))
+
+
+def _truthy(value) -> bool:
+    return value is True or str(value).strip().lower() in ("true", "yes", "1")
+
+
+def _rubric_score(company):
+    """1 point to start, plus the points for each "yes". None if the model gave no rubric answers."""
+    if not any(key in company for key, _ in RUBRIC):
+        return None
+    reasons = [key for key, _ in RUBRIC if _truthy(company.get(key))]
+    company["score_reasons"] = reasons
+    return float(min(5, 1 + sum(points for key, points in RUBRIC if key in reasons)))
 
 
 def _score(company) -> float:
@@ -298,17 +328,57 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9áéíóúñü]+", " ", (text or "").lower()).strip()
 
 
+BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                                 "(KHTML, like Gecko) Chrome/120 Safari/537.36"}
+
+
+def _fetch_text(url: str, timeout: int = 8) -> str:
+    """Download a page and return its visible text (lower case, accents removed). "" if it can't be opened."""
+    if not (url or "").startswith(("http://", "https://")):
+        return ""
+    lenient = ssl.create_default_context()
+    lenient.check_hostname = False
+    lenient.verify_mode = ssl.CERT_NONE
+    try:
+        request = urllib.request.Request(url, headers=BROWSER_HEADERS)
+        with urllib.request.urlopen(request, timeout=timeout, context=lenient) as r:
+            raw = r.read(600_000).decode("utf-8", "ignore")
+    except Exception:
+        return ""
+    raw = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+    text = html.unescape(re.sub(r"(?s)<[^>]+>", " ", raw))
+    return text.lower().translate(ACCENTS)
+
+
+def _quote_pieces(evidence: str) -> list:
+    # The model often joins pieces of the page with "..." — every piece must be found
+    pieces = [_normalize(p.translate(ACCENTS)) for p in re.split(r"\.\.\.|…", evidence or "")]
+    return [p for p in pieces if p]
+
+
 def _check_evidence(companies: list, results: list) -> None:
-    """Mark evidence_verified = True only if the quote really appears in the search result it came from.
-    This is how the app tells a checked fact apart from something the AI may have made up."""
-    by_link = {r["link"]: _normalize(f"{r['title']} {r['snippet']}") for r in results}
-    for c in companies:
-        page = by_link.get(c.get("source"), "")
-        # The model often joins pieces of the page with "..." — check every piece is really there
-        pieces = [_normalize(p) for p in re.split(r"\.\.\.|…", c.get("evidence", ""))]
-        pieces = [p for p in pieces if p]
-        long_enough = sum(len(p) for p in pieces) >= 12
-        c["evidence_verified"] = bool(pieces) and long_enough and all(p in page for p in pieces)
+    """Check every quote, and record how it was checked:
+    "page"    = found word for word on the source page itself (the page was opened)
+    "snippet" = the page could not be opened, but the quote is in the search result summary of that page
+    "none"    = not found, so it may be the AI's own wording.
+    evidence_verified is True for "page" and "snippet"; the app shows which one."""
+    by_link = {r["link"]: _normalize(f"{r['title']} {r['snippet']}".translate(ACCENTS)) for r in results}
+
+    def check(c):
+        pieces = _quote_pieces(c.get("evidence", ""))
+        level = "none"
+        if pieces and sum(len(p) for p in pieces) >= 12:
+            page = _normalize(_fetch_text(c.get("source", "")))
+            if page and all(p in page for p in pieces):
+                level = "page"
+            elif all(p in by_link.get(c.get("source"), "") for p in pieces):
+                level = "snippet"
+        c["evidence_level"] = level
+        c["evidence_verified"] = level != "none"
+
+    if companies:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(check, companies))
 
 
 COUNTRY_TLDS = {
@@ -322,22 +392,12 @@ COUNTRY_TLDS = {
 }
 
 
-def _page_mentions(url: str, name: str, timeout: int = 8) -> bool:
-    """Open a page and check that a distinctive word of the company name appears in it.
+def _page_mentions(url: str, name: str) -> bool:
+    """Open a page and check that the distinctive words of the company name appear in it.
     Used for guessed domains, so a parked page or another company is not accepted."""
     words = [w.translate(ACCENTS) for w in _name_words(name)]
-    if not words:
-        return False
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                             "(KHTML, like Gecko) Chrome/120 Safari/537.36"}
-    lenient = ssl.create_default_context()
-    lenient.check_hostname = False
-    lenient.verify_mode = ssl.CERT_NONE
-    try:
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=timeout, context=lenient) as r:
-            text = r.read(300_000).decode("utf-8", "ignore").lower().translate(ACCENTS)
-    except Exception:
+    text = _fetch_text(url)
+    if not words or not text:
         return False
     if any(p in text for p in ("domain is for sale", "dominio en venta", "buy this domain", "parked")):
         return False
@@ -379,7 +439,7 @@ def find_missing_websites(companies: list, country: str, usage: "Usage") -> list
             results = web_search(query)
         except ValueError:
             return ""
-        usage.searches += 1
+        usage.add_search()
         for r in results:
             if _looks_like_official_site(r["link"], name):
                 parts = urllib.parse.urlparse(r["link"])
@@ -400,22 +460,6 @@ def find_missing_websites(companies: list, country: str, usage: "Usage") -> list
             if _page_mentions(url, name):
                 company["website"] = url
                 company["website_guessed"] = True
-                return
-
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        list(pool.map(lookup, missing))
-    return companies
-
-    def lookup(company):
-        try:
-            results = web_search(f"{company.get('name', '')} {country} official website")
-        except ValueError:
-            return
-        usage.searches += 1
-        for r in results:
-            if _looks_like_official_site(r["link"], company.get("name", "")):
-                parts = urllib.parse.urlparse(r["link"])
-                company["website"] = f"{parts.scheme}://{parts.netloc}"
                 return
 
     with ThreadPoolExecutor(max_workers=5) as pool:
@@ -449,30 +493,92 @@ def _clean(companies: list) -> list:
         seen.add(key)
         if _is_not_a_buyer(c):
             continue
-        c["fit_score"] = _score(c)
+        rubric = _rubric_score(c)
+        c["fit_score"] = rubric if rubric is not None else _score(c)
         c["intent"] = TIERS.get(round(c["fit_score"]), "Low / 低")
         c["linkedin_search"] = _linkedin_search(c)
         result.append(c)
     return sorted(result, key=_score, reverse=True)
 
 
+COUNTRY_NAMES_EN = {
+    "西班牙": "Spain", "墨西哥": "Mexico", "德国": "Germany", "法国": "France", "意大利": "Italy",
+    "葡萄牙": "Portugal", "荷兰": "Netherlands", "波兰": "Poland", "英国": "United Kingdom", "美国": "United States",
+    "巴西": "Brazil", "智利": "Chile", "哥伦比亚": "Colombia", "印度": "India", "沙特": "Saudi Arabia",
+    "沙特阿拉伯": "Saudi Arabia", "土耳其": "Turkey", "澳大利亚": "Australia", "日本": "Japan", "越南": "Vietnam",
+    "加拿大": "Canada", "阿联酋": "United Arab Emirates", "南非": "South Africa", "俄罗斯": "Russia",
+}
+
+
+def to_english(product: str, country: str, usage: "Usage") -> tuple:
+    """Searches work best in English: a Chinese product or country name would return Chinese pages.
+    Known country names are translated from a table; anything else is translated by the model."""
+    country_en = COUNTRY_NAMES_EN.get(country.strip(), country.strip())
+    if product.isascii() and country_en.isascii():
+        return product.strip(), country_en
+    response = ask([{"role": "user", "content":
+                     "Translate into short, plain English as used in international trade. Return only JSON "
+                     f'like {{"product": "...", "country": "..."}}.\nproduct: {product}\ncountry: {country_en}'}], 300)
+    usage.add(response)
+    try:
+        data = json.loads(re.search(r"\{.*\}", _text_from(response), re.S).group())
+        return (data.get("product") or product).strip(), (data.get("country") or country_en).strip()
+    except Exception:
+        return product.strip(), country_en
+
+
 def research_buyers(seller: str, product: str, country: str, n: int = 10,
-                    max_searches: int = 5, usage: Usage | None = None, progress=None):
+                    max_searches: int = 5, usage: Usage | None = None, progress=None,
+                    language: str = "English"):
     """Step 1: find potential buyers (list of dicts), using whichever provider is switched on.
-    progress(stage, **details) is called at each step so the app can show what is happening."""
+    progress(stage, **details) is called at each step so the app can show what is happening.
+    language is the language for the AI's own text (what they sell, why they fit, next step)."""
     usage = usage or Usage()
     progress = progress or (lambda stage, **details: None)
+    product, country = to_english(product, country, usage)
     if PROVIDER == "claude":
         progress("claude_search")
-        return _research_with_claude(seller, product, country, n, max_searches, usage)
-    return _research_with_search_api(seller, product, country, n, usage, progress)
+        companies = _research_with_claude(seller, product, country, n, max_searches, usage, language)
+        return _finish(companies, [], country, usage, progress)
+    return _research_with_search_api(seller, product, country, n, usage, progress, language)
 
 
-def _research_with_claude(seller, product, country, n, max_searches, usage):
+def _norm_url(url: str) -> str:
+    """Compare links loosely: http/https, www., a trailing slash or #anchor don't make them different."""
+    url = (url or "").strip().lower().split("#")[0]
+    url = re.sub(r"^https?://", "", url).replace("www.", "", 1)
+    return url.rstrip("/")
+
+
+def _dedupe_by_website(companies: list) -> list:
+    """After websites are filled in, two rows can turn out to be the same company: keep the better one."""
+    best = {}
+    for c in companies:
+        host = urllib.parse.urlparse(c.get("website") or "").netloc.lower().replace("www.", "")
+        key = host or f'name:{(c.get("name") or "").lower().strip()}'
+        if key not in best or c.get("fit_score", 0) > best[key].get("fit_score", 0):
+            best[key] = c
+    kept = set(map(id, best.values()))
+    return [c for c in companies if id(c) in kept]
+
+
+def _finish(companies, results, country, usage, progress) -> list:
+    """Same checks for every provider: clean, check websites and evidence, fill in websites, dedupe."""
+    companies = _clean(companies)
+    check_given_websites(companies)
+    _check_evidence(companies, results)
+    missing = sum(1 for c in companies if not c.get("website"))
+    if missing:
+        progress("websites", count=missing)
+    companies = find_missing_websites(companies, country, usage)
+    return _dedupe_by_website(companies)
+
+
+def _research_with_claude(seller, product, country, n, max_searches, usage, language="English"):
     """Claude searches the web itself (built-in web search tool)."""
     messages = [{
         "role": "user",
-        "content": RESEARCH_PROMPT.format(seller=seller, product=product, country=country, n=n),
+        "content": RESEARCH_PROMPT.format(seller=seller, product=product, country=country, n=n, language=language),
     }]
     tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches}]
 
@@ -484,7 +590,7 @@ def _research_with_claude(seller, product, country, n, max_searches, usage):
             break
         messages = messages + [{"role": "assistant", "content": response.content}]
 
-    return _clean(_extract_json(_text_from(response)))
+    return _extract_json(_text_from(response))
 
 
 def serp_search(query: str, timeout: int = 20) -> list:
@@ -542,14 +648,14 @@ def search_queries(product: str, country: str) -> list:
             f"{product} wholesaler {country}"]
 
 
-def _research_with_search_api(seller, product, country, n, usage, progress=None):
+def _research_with_search_api(seller, product, country, n, usage, progress=None, language="English"):
     """Search the web first (DeepSeek Search or SerpAPI), then let the model pick real buyers from the results."""
     progress = progress or (lambda stage, **details: None)
     results, seen = [], set()
     queries = search_queries(product, country)
     for i, q in enumerate(queries, 1):
         progress("search", i=i, total=len(queries), query=q)
-        usage.searches += 1
+        usage.add_search()
         for r in web_search(q):
             if r["link"] and r["link"] not in seen:
                 seen.add(r["link"])
@@ -561,7 +667,7 @@ def _research_with_search_api(seller, product, country, n, usage, progress=None)
     listing = "\n".join(f"[{i}] {r['title']}\n    URL: {r['link']}\n    {r['snippet']}"
                         for i, r in enumerate(results[:40], 1))
     messages = [{"role": "user", "content": PICK_PROMPT.format(
-        seller=seller, product=product, country=country, n=n, results=listing)}]
+        seller=seller, product=product, country=country, n=n, results=listing, language=language)}]
     progress("pick")
     companies = None
     for attempt in range(2):
@@ -583,16 +689,16 @@ def _research_with_search_api(seller, product, country, n, usage, progress=None)
                                             "If none of the results are buyers, reply <json>[]</json>."},
             ]
 
-    # Keep only companies whose source really is one of the search results (no made-up sources)
-    allowed = {r["link"] for r in results}
-    companies = [c for c in companies if c.get("source") in allowed]
-    companies = _clean(companies)
-    _check_evidence(companies, results)
-    check_given_websites(companies)
-    missing = sum(1 for c in companies if not c.get("website"))
-    if missing:
-        progress("websites", count=missing)
-    return find_missing_websites(companies, country, usage)
+    # Keep only companies whose source really is one of the search results (no made-up sources).
+    # Links are compared loosely, so a missing "/" or "www." doesn't throw a real buyer away.
+    by_norm = {_norm_url(r["link"]): r["link"] for r in results}
+    kept = []
+    for c in companies:
+        link = by_norm.get(_norm_url(c.get("source", "")))
+        if link:
+            c["source"] = link
+            kept.append(c)
+    return _finish(kept, results, country, usage, progress)
 
 
 def check_website(url: str, timeout: int = 10) -> bool:

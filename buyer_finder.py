@@ -245,13 +245,53 @@ def _name_words(name: str) -> list:
     return [w for w in words if w not in LEGAL_WORDS and len(w) >= 4]
 
 
+ACCENTS = str.maketrans("áéíóúñüàèòç", "aeiounuaeoc")
+
+
+def _all_name_words(name: str) -> set:
+    """Every word in the name, generic ones included (used to read domains like herrajesmonastil.es)."""
+    words = re.findall(r"[a-z0-9áéíóúñüàèòç]+", name.lower().translate(ACCENTS))
+    return {w for w in words if len(w) >= 2}
+
+
+def _made_of(label: str, words: set) -> bool:
+    """True if the label can be split entirely into words from the name, e.g. "herrajesmonastil"."""
+    if not label:
+        return True
+    return any(label.startswith(w) and _made_of(label[len(w):], words) for w in words)
+
+
 def _looks_like_official_site(link: str, name: str) -> bool:
-    """True if the link's domain is not a directory and contains a word from the company name."""
-    host = urllib.parse.urlparse(link).netloc.lower().replace("www.", "")
+    """True if the link is not a directory and its domain name is built from the company's own name.
+    Accepts monastil.es, herrajesmonastil.es, verdu-herrajes.com; rejects cauchoverdu.com (another company)."""
+    host = urllib.parse.urlparse(link if "//" in link else "https://" + link).netloc.lower()
+    host = host.replace("www.", "")
     if not host or any(d in host for d in DIRECTORY_DOMAINS):
         return False
-    ascii_host = host.translate(str.maketrans("áéíóúñü", "aeiounu"))
-    return any(w.translate(str.maketrans("áéíóúñü", "aeiounu")) in ascii_host for w in _name_words(name))
+    label = host.split(".")[0].translate(ACCENTS).replace("-", "")
+    distinctive = [w.translate(ACCENTS) for w in _name_words(name)]
+    if not any(w in label for w in distinctive):
+        return False
+    if _made_of(label, _all_name_words(name)):
+        return True
+    return any(label.startswith(w) and len(w) >= 5 for w in distinctive)
+
+
+def _domain_in_path(link: str) -> str:
+    """Directory pages like brandfetch.com/micel.es carry the real domain in the path."""
+    first = urllib.parse.urlparse(link).path.strip("/").split("/")[0]
+    return f"https://{first}" if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", first or "") else ""
+
+
+def check_given_websites(companies: list) -> None:
+    """The model sometimes puts a directory or a reseller's page in the website field.
+    Keep a website only if it looks like the company's own; otherwise clear it so it gets looked up."""
+    for c in companies:
+        site, name = c.get("website") or "", c.get("name", "")
+        if not site or _looks_like_official_site(site, name):
+            continue
+        fixed = _domain_in_path(site)
+        c["website"] = fixed if fixed and _looks_like_official_site(fixed, name) else ""
 
 
 def _normalize(text: str) -> str:
@@ -457,6 +497,7 @@ def _research_with_search_api(seller, product, country, n, usage, progress=None)
     companies = [c for c in companies if c.get("source") in allowed]
     companies = _clean(companies)
     _check_evidence(companies, results)
+    check_given_websites(companies)
     missing = sum(1 for c in companies if not c.get("website"))
     if missing:
         progress("websites", count=missing)

@@ -1,11 +1,78 @@
-"""Simple web interface for Buyer Finder. Run with:  streamlit run app.py"""
+"""Web interface for Buyer Finder. Run with:  streamlit run app.py"""
 
+import html
 import os
 
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Buyer Finder", page_icon="🌍", layout="wide")
+st.set_page_config(page_title="Buyer Finder · AI buyer research for exporters", page_icon="🌍", layout="wide")
+
+GITHUB_URL = "https://github.com/hailey-studio/buyer-finder"
+
+STYLE = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap');
+:root { --ink: #1E2A38; --steel: #5F6E7D; --rule: #D5DBDF; --paper: #F4F6F5; --stamp: #2449A8;
+        --ok: #2E7D4F; --caution: #9A6416; }
+html, body, [class*="css"], .stMarkdown, button, input, textarea, label {
+  font-family: 'IBM Plex Sans', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
+#MainMenu, footer, [data-testid="stDecoration"] { visibility: hidden; }
+.block-container { max-width: 980px; padding-top: 3rem; }
+h1, h2, h3 { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; color: var(--ink); }
+
+.bf-head { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 22px; }
+.bf-head .mark { font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 700; font-size: 34px;
+  color: var(--ink); letter-spacing: -0.3px; margin: 0; line-height: 1.1; }
+.bf-head .lede { color: var(--steel); font-size: 16.5px; margin: 6px 0 0; max-width: 62ch; }
+.bf-flow { color: var(--steel); font-size: 14px; margin: 0 0 18px; max-width: 75ch; line-height: 1.6; }
+.bf-flow b { color: var(--ink); font-weight: 600; }
+
+[data-testid="stForm"] { border: 1px solid var(--rule) !important; border-radius: 6px !important; background: #fff; }
+.stFormSubmitButton button { background: var(--stamp); color: #fff; border: none; border-radius: 4px;
+  padding: 9px 22px; font-weight: 600; }
+.stFormSubmitButton button:hover { background: #1b3a8a; color: #fff; }
+.stFormSubmitButton button:focus-visible { outline: 3px solid #9db4ee; outline-offset: 2px; }
+
+.bf-route { margin: 30px 0 4px; }
+.bf-route .what { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; font-weight: 700;
+  font-size: 38px; line-height: 1.1; color: var(--ink); }
+.bf-route .to { color: var(--stamp); }
+.bf-summary { color: var(--steel); font-size: 15.5px; margin: 8px 0 18px; max-width: 75ch; }
+
+.bf-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; padding: 18px 0 6px;
+  border-top: 1px solid var(--rule); }
+.bf-rank { font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 20px; color: var(--steel); }
+.bf-name { font-weight: 600; font-size: 18px; color: var(--ink); }
+.bf-meta { color: var(--steel); font-size: 14px; margin-top: 2px; }
+.bf-meta a { color: var(--stamp); }
+.bf-status { font-size: 13.5px; margin-top: 6px; }
+.bf-status span { margin-right: 16px; white-space: nowrap; }
+.bf-status .ok::before, .bf-status .no::before { content: ""; display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.bf-status .ok { color: var(--ok); } .bf-status .ok::before { background: var(--ok); }
+.bf-status .no { color: var(--caution); } .bf-status .no::before { background: var(--caution); }
+.bf-fit { text-align: right; min-width: 92px; }
+.bf-fit .num { font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 700; font-size: 26px; color: var(--ink); line-height: 1; }
+.bf-fit .num small { font-size: 14px; color: var(--steel); font-weight: 500; }
+.bf-fit .bar { display: flex; gap: 3px; justify-content: flex-end; margin-top: 6px; }
+.bf-fit .bar i { width: 12px; height: 5px; background: var(--rule); border-radius: 1px; }
+.bf-fit .bar i.on { background: var(--stamp); }
+.bf-why { color: var(--ink); font-size: 15px; line-height: 1.55; margin: 8px 0 4px; max-width: 75ch; }
+[class*="st-key-bfrow"] [data-testid="stExpander"] details { border: none !important; border-left: 2px solid var(--rule) !important;
+  border-radius: 0 !important; margin-left: 48px; width: calc(100% - 48px); background: transparent; }
+[class*="st-key-bfrow"] [data-testid="stExpander"] summary { color: var(--stamp); font-size: 14px; }
+.bf-note { color: var(--steel); font-size: 13.5px; margin-top: 10px; max-width: 75ch; }
+
+.bf-footer { color: var(--steel); font-size: 13px; margin: 48px 0 12px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.bf-footer a { color: var(--stamp); }
+@media (max-width: 700px) { .bf-route .what { font-size: 28px; } .bf-row { grid-template-columns: 26px 1fr; }
+  .bf-fit { grid-column: 2; text-align: left; } .bf-fit .bar { justify-content: flex-start; }
+  [class*="st-key-bfrow"] [data-testid="stExpander"] details { margin-left: 0; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+"""
+st.markdown(STYLE, unsafe_allow_html=True)
 
 
 def _secret(name):
@@ -23,18 +90,17 @@ for name in ("BUYER_FINDER_PROVIDER", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "
     if _secret(name):
         os.environ[name] = _secret(name)
 
-# Optional password, so strangers can't use up the API credits
-password = _secret("APP_PASSWORD")
-if password:
-    entered = st.text_input("Password", type="password")
-    if entered != password:
-        st.info("Enter the password to use Buyer Finder.")
-        st.stop()
-
-from buyer_finder import Usage, draft_emails, friendly_error, research_buyers, verify_websites  # noqa: E402
-
 TEXT = {
     "English": {
+        "tagline": "Tell it what your factory makes and where you want to sell. It finds importers and distributors there, shows the evidence for each one, and drafts a first email.",
+        "flow": "<b>1</b> Search the web for buyers &nbsp; <b>2</b> Drop competitors, marketplaces and directories &nbsp; <b>3</b> Check each quote against its source and confirm the website &nbsp; <b>4</b> Draft emails for the best matches",
+        "route_to": "to",
+        "summary": "{n} buyers found. Evidence checked for {checked}, official website confirmed for {ok}. This search cost {cost}.",
+        "rank_fit": "fit",
+        "pw_title": "This demo is password protected",
+        "pw_body": "Ask Hailey for the password.",
+        "footer": "Built by Hailey Qiu with Python, Streamlit and DeepSeek or Claude.",
+        "source_code": "Source code on GitHub",
         "caption": "Describe what you sell and where. The agent searches the web for real buyers, checks their websites and drafts your first emails.",
         "about": "About your company",
         "about_default": "A factory in Zhejiang, China making stainless steel kitchen hardware. 15 years of export experience, OEM available.",
@@ -53,7 +119,7 @@ TEXT = {
         "found": "{n} potential buyers in {country} ({ok} with a working website)",
         "download": "Download CSV",
         "drafts": "First email drafts",
-        "warn": "Companies marked ⚠️ may be outdated or wrong. Always check the website and source before you reach out.",
+        "warn": "Companies without a confirmed website or checked evidence may be outdated or wrong. Open the source before you reach out.",
         "missing": "Please fill in the product and the target country.",
         "none": "No companies found. Try a broader product description or another country.",
         "working": "Finding buyers...",
@@ -70,18 +136,29 @@ TEXT = {
         "why": "Why they fit",
         "evidence": "Evidence",
         "verified": "✔ Quote checked against the source page",
+        "chip_ev": "Evidence checked",
+        "chip_no_ev": "Evidence not checked",
         "unverified": "⚠ AI summary, not checked word for word. Open the source to confirm.",
         "no_evidence": "No quote found. Check the source before relying on this.",
         "source": "Source",
         "next": "Suggested next step",
-        "find_people": "Find their buyer on LinkedIn →",
-        "site_ok": "✅ Website opens",
-        "site_bad": "⚠️ Website not confirmed",
+        "find_people": "Find their purchasing manager on LinkedIn",
+        "site_ok": "Website opens",
+        "site_bad": "Website not confirmed",
         "email": "First email draft",
         "only_ok": "Only show companies with a working website",
         "cost": "Estimated cost of this run: {cur}{cost:.3f} ({searches} web searches, {tokens:,} tokens)",
     },
     "中文": {
+        "tagline": "填写你的工厂做什么、想卖到哪个国家。它会找出当地的进口商和分销商，给出每一家的证据，并起草第一封开发信。",
+        "flow": "<b>1</b> 上网搜索买家 &nbsp; <b>2</b> 去掉同行、平台和名录网站 &nbsp; <b>3</b> 逐字核对证据，确认官网 &nbsp; <b>4</b> 为最匹配的几家写开发信",
+        "route_to": "销往",
+        "summary": "找到 {n} 家买家。其中 {checked} 家的证据已核对，{ok} 家官网已确认。本次搜索花费 {cost}。",
+        "rank_fit": "匹配度",
+        "pw_title": "这个演示需要密码",
+        "pw_body": "请向 Hailey 要密码。",
+        "footer": "Hailey Qiu 制作，使用 Python、Streamlit 和 DeepSeek 或 Claude。",
+        "source_code": "GitHub 源代码",
         "caption": "填写你卖什么、想卖到哪里。AI 会上网搜索真实买家，核验对方网站，并帮你写好第一封开发信。",
         "about": "公司介绍",
         "about_default": "浙江一家不锈钢厨房五金工厂，15 年出口经验，可做 OEM。",
@@ -100,7 +177,7 @@ TEXT = {
         "found": "在{country}找到 {n} 家潜在买家（其中 {ok} 家网站可以打开）",
         "download": "下载 CSV 表格",
         "drafts": "开发信草稿",
-        "warn": "标了 ⚠️ 的公司可能信息过时或有误。联系之前，请先打开官网和来源链接核实。",
+        "warn": "官网未确认或证据未核对的公司，信息可能过时或有误。联系之前请先打开来源链接核实。",
         "missing": "请填写产品和目标国家。",
         "none": "没有找到公司。试试把产品描述写宽一些，或换一个国家。",
         "working": "正在找买家……",
@@ -117,24 +194,48 @@ TEXT = {
         "why": "推荐理由",
         "evidence": "证据",
         "verified": "✔ 已核对：这句话确实出现在来源网页里",
+        "chip_ev": "证据已核对",
+        "chip_no_ev": "证据未核对",
         "unverified": "⚠ 这是 AI 的概括，没有逐字核对。请打开来源确认。",
         "no_evidence": "没有找到原文证据。联系之前请先看来源链接。",
         "source": "来源",
         "next": "建议下一步",
-        "find_people": "在 LinkedIn 上找采购负责人 →",
-        "site_ok": "✅ 官网能打开",
-        "site_bad": "⚠️ 官网未确认",
+        "find_people": "在 LinkedIn 上找采购负责人",
+        "site_ok": "官网能打开",
+        "site_bad": "官网未确认",
         "email": "开发信草稿",
         "only_ok": "只显示官网能打开的公司",
         "cost": "本次运行估算花费：{cur}{cost:.3f}（网页搜索 {searches} 次，共 {tokens:,} 个 tokens）",
     },
 }
 
-lang = st.radio("Language / 界面语言", list(TEXT), horizontal=True)
-T = TEXT[lang]
 
-st.title("🌍 Buyer Finder")
-st.caption(T["caption"])
+_, lang_col = st.columns([5, 1.3])
+lang = lang_col.radio("Language / 界面语言", list(TEXT), horizontal=True, label_visibility="collapsed")
+T = TEXT[lang]
+e = html.escape
+
+st.markdown(f'<div class="bf-head"><p class="mark">Buyer Finder</p><p class="lede">{e(T["tagline"])}</p></div>',
+            unsafe_allow_html=True)
+
+
+def footer():
+    st.markdown(f'<div class="bf-footer">{e(T["footer"])} <a href="{GITHUB_URL}" target="_blank">'
+                f'{e(T["source_code"])}</a></div>', unsafe_allow_html=True)
+
+
+# Optional password, so strangers can't use up the API credits
+password = _secret("APP_PASSWORD")
+if password:
+    entered = st.text_input(T["pw_title"], type="password", placeholder="••••••••")
+    if entered != password:
+        st.caption(T["pw_body"])
+        footer()
+        st.stop()
+
+from buyer_finder import Usage, draft_emails, friendly_error, research_buyers, verify_websites  # noqa: E402
+
+st.markdown(f'<p class="bf-flow">{T["flow"]}</p>', unsafe_allow_html=True)
 
 with st.form("inputs"):
     seller = st.text_area(T["about"], T["about_default"])
@@ -178,39 +279,57 @@ if run:
         st.stop()
     status.update(label=T["done"].format(n=len(companies)), state="complete", expanded=False)
     # Keep results, so clicking "Download" (which reloads the page) doesn't wipe them
-    st.session_state["result"] = {"companies": companies, "drafts": drafts, "country": country, "usage": usage}
+    st.session_state["result"] = {"companies": companies, "drafts": drafts, "country": country,
+                                  "product": product, "usage": usage}
 
 result = st.session_state.get("result")
 
 
-def stars(score) -> str:
+def fit_bar(score) -> str:
     full = int(round(float(score or 0)))
-    return "★" * full + "☆" * (5 - full)
+    return "".join(f'<i class="{"on" if i < full else ""}"></i>' for i in range(5))
+
+
+def safe_link(url: str) -> str:
+    return url if (url or "").startswith(("http://", "https://")) else ""
 
 
 if result:
     companies = result["companies"]
     emails = {d["company"]: d["email"] for d in result["drafts"]}
     ok = sum(1 for c in companies if c.get("website_ok"))
-    st.subheader(T["found"].format(n=len(companies), country=result["country"], ok=ok))
+    checked = sum(1 for c in companies if c.get("evidence_verified"))
+    u = result["usage"]
+
+    st.markdown(
+        f'<div class="bf-route"><div class="what">{e(result.get("product", ""))} '
+        f'<span class="to">{e(T["route_to"])} {e(result["country"])}</span></div></div>'
+        f'<p class="bf-summary">{e(T["summary"].format(n=len(companies), checked=checked, ok=ok, cost=f"{u.currency}{u.cost:.3f}"))}</p>',
+        unsafe_allow_html=True)
     only_ok = st.toggle(T["only_ok"], value=False)
 
-    for c in companies:
+    for rank, c in enumerate(companies, 1):
         if only_ok and not c.get("website_ok"):
             continue
-        with st.container(border=True):
-            left, right = st.columns([3, 1])
-            place = " · ".join(x for x in (c.get("city"), c.get("type")) if x)
-            left.markdown(f"**{c.get('name', '')}**  \n{place}")
-            right.markdown(f"<span style='color:#d4a017;font-size:1.2em'>{stars(c.get('fit_score'))}</span>  \n"
-                           f"{c.get('intent', '')}", unsafe_allow_html=True)
-            site = c.get("website")
+        with st.container(key=f"bfrow{rank}"):
+            site = safe_link(c.get("website", ""))
+            meta = ", ".join(e(x) for x in (c.get("type"), c.get("city")) if x)
             if site:
-                label = T["site_ok"] if c.get("website_ok") else T["site_bad"]
-                st.markdown(f"{label} · [{site}]({site})")
-            else:
-                st.markdown(T["site_bad"])
-            st.markdown(f"**{T['why']}:** {c.get('why_fit', '')}")
+                meta += f' &nbsp; <a href="{e(site)}" target="_blank">{e(site.split("//", 1)[-1].rstrip("/"))}</a>'
+            site_ok = bool(site and c.get("website_ok"))
+            status = (f'<span class="{"ok" if site_ok else "no"}">{e(T["site_ok"] if site_ok else T["site_bad"])}</span>'
+                      f'<span class="{"ok" if c.get("evidence_verified") else "no"}">'
+                      f'{e(T["chip_ev"] if c.get("evidence_verified") else T["chip_no_ev"])}</span>')
+            score = float(c.get("fit_score") or 0)
+            st.markdown(
+                f"""<div class="bf-row"><div class="bf-rank">{rank}</div>
+                <div><div class="bf-name">{e(c.get('name', ''))}</div><div class="bf-meta">{meta}</div>
+                <div class="bf-status">{status}</div>
+                <div class="bf-why">{e(c.get('why_fit', ''))}</div></div>
+                <div class="bf-fit"><div class="num">{score:.0f}<small>/5 {e(T['rank_fit'])}</small></div>
+                <div class="bar">{fit_bar(score)}</div></div></div>""",
+                unsafe_allow_html=True,
+            )
             with st.expander(T["details"]):
                 st.markdown(f"**{T['sells']}:** {c.get('what_they_sell', '')}")
                 st.markdown(f"**{T['evidence']}:**")
@@ -219,10 +338,11 @@ if result:
                     st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
                 else:
                     st.caption(T["no_evidence"])
-                if c.get("source"):
+                if safe_link(c.get("source", "")):
                     st.markdown(f"**{T['source']}:** [{c['source']}]({c['source']})")
                 st.markdown(f"**{T['next']}:** {c.get('next_step', '')}")
-                st.markdown(f"[{T['find_people']}]({c.get('linkedin_search', '')})")
+                if safe_link(c.get("linkedin_search", "")):
+                    st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
                 if c.get("name") in emails:
                     st.markdown(f"**{T['email']}:**")
                     st.code(emails[c["name"]], language=None, wrap_lines=True)
@@ -232,7 +352,8 @@ if result:
              "why_fit", "evidence", "evidence_verified", "next_step", "website", "linkedin_search", "source"]
     df = df[[c for c in order if c in df.columns] + [c for c in df.columns if c not in order]]
     st.download_button(T["download"], df.to_csv(index=False).encode("utf-8-sig"), f"buyers_{result['country']}.csv")
+    st.markdown(f'<p class="bf-note">{e(T["warn"])} '
+                f'{e(T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches, tokens=u.input_tokens + u.output_tokens))}</p>',
+                unsafe_allow_html=True)
 
-    u = result["usage"]
-    st.caption(T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches, tokens=u.input_tokens + u.output_tokens))
-    st.info(T["warn"])
+footer()

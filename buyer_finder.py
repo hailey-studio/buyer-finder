@@ -15,6 +15,7 @@ Every step also reports its usage, so the app can show what a run cost.
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -72,6 +73,13 @@ def get_client():
                 f"API key missing: set {cfg['key_env']}. / 缺少 API 密钥：请设置 {cfg['key_env']}。")
         _client = anthropic.Anthropic(api_key=key, base_url=cfg["base_url"]) if cfg["base_url"] else anthropic.Anthropic(api_key=key)
     return _client
+
+
+def ask(messages, max_tokens, **kwargs):
+    """One model call. DeepSeek's thinking mode is switched off so the whole budget goes to the answer."""
+    if PROVIDER == "deepseek":
+        kwargs.setdefault("thinking", {"type": "disabled"})
+    return get_client().messages.create(model=model_name(), max_tokens=max_tokens, messages=messages, **kwargs)
 
 
 @dataclass
@@ -250,7 +258,7 @@ def _research_with_claude(seller, product, country, n, max_searches, usage):
 
     # Long searches can pause mid-way ("pause_turn"); send the partial answer back to continue.
     for _ in range(3):
-        response = get_client().messages.create(model=model_name(), max_tokens=8000, messages=messages, tools=tools)
+        response = ask(messages, 8000, tools=tools)
         usage.add(response)
         if getattr(response, "stop_reason", None) != "pause_turn":
             break
@@ -328,14 +336,27 @@ def _research_with_search_api(seller, product, country, n, usage):
 
     listing = "\n".join(f"[{i}] {r['title']}\n    URL: {r['link']}\n    {r['snippet']}"
                         for i, r in enumerate(results[:40], 1))
-    response = get_client().messages.create(
-        model=model_name(),
-        max_tokens=8000,
-        messages=[{"role": "user", "content": PICK_PROMPT.format(
-            seller=seller, product=product, country=country, n=n, results=listing)}],
-    )
-    usage.add(response)
-    companies = _extract_json(_text_from(response))
+    messages = [{"role": "user", "content": PICK_PROMPT.format(
+        seller=seller, product=product, country=country, n=n, results=listing)}]
+    companies = None
+    for attempt in range(2):
+        response = ask(messages, 8000)
+        usage.add(response)
+        text = _text_from(response)
+        try:
+            companies = _extract_json(text)
+            break
+        except ValueError:
+            # Shows up in the app logs (Manage app) so a bad answer can be checked
+            print(f"[buyer-finder] attempt {attempt + 1}: stop_reason={response.stop_reason}, "
+                  f"answer started with: {text[:500]!r}", file=sys.stderr)
+            if attempt == 1:
+                raise
+            messages = messages + [
+                {"role": "assistant", "content": text or "(empty)"},
+                {"role": "user", "content": "Reply with only the list in <json>[...]</json> tags. "
+                                            "If none of the results are buyers, reply <json>[]</json>."},
+            ]
 
     # Keep only companies whose source really is one of the search results (no made-up sources)
     allowed = {r["link"] for r in results}
@@ -373,9 +394,8 @@ def verify_websites(companies: list) -> list:
 
 
 def _draft_one(seller, product, company, language, usage):
-    response = get_client().messages.create(
-        model=model_name(),
-        max_tokens=1000,
+    response = ask(
+        max_tokens=1500,
         messages=[{
             "role": "user",
             "content": EMAIL_PROMPT.format(

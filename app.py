@@ -53,9 +53,32 @@ TEXT = {
         "found": "{n} potential buyers in {country} ({ok} with a working website)",
         "download": "Download CSV",
         "drafts": "First email drafts",
-        "warn": "Rows with website_ok = False may be outdated or wrong. Always check the website and source before you reach out.",
+        "warn": "Companies marked ⚠️ may be outdated or wrong. Always check the website and source before you reach out.",
         "missing": "Please fill in the product and the target country.",
         "none": "No companies found. Try a broader product description or another country.",
+        "working": "Finding buyers...",
+        "done": "Done: {n} buyers found",
+        "step_search": "Searching the web ({i}/{total}): {query}",
+        "step_results": "Found {count} web pages. Removing duplicates and directories...",
+        "step_pick": "AI is reading the pages and picking real buyers...",
+        "step_websites": "Looking up official websites for {count} companies...",
+        "step_claude": "Claude is searching the web (about 1 minute)...",
+        "step_verify": "Checking that each website opens...",
+        "step_draft": "Writing {top} first emails...",
+        "details": "Details",
+        "sells": "What they sell",
+        "why": "Why they fit",
+        "evidence": "Evidence",
+        "verified": "✔ Quote checked against the source page",
+        "unverified": "⚠ AI summary, not checked word for word. Open the source to confirm.",
+        "no_evidence": "No quote found. Check the source before relying on this.",
+        "source": "Source",
+        "next": "Suggested next step",
+        "find_people": "Find their buyer on LinkedIn →",
+        "site_ok": "✅ Website opens",
+        "site_bad": "⚠️ Website not confirmed",
+        "email": "First email draft",
+        "only_ok": "Only show companies with a working website",
         "cost": "Estimated cost of this run: {cur}{cost:.3f} ({searches} web searches, {tokens:,} tokens)",
     },
     "中文": {
@@ -77,9 +100,32 @@ TEXT = {
         "found": "在{country}找到 {n} 家潜在买家（其中 {ok} 家网站可以打开）",
         "download": "下载 CSV 表格",
         "drafts": "开发信草稿",
-        "warn": "website_ok 为 False 的公司可能信息过时或有误。联系之前，请先打开网站和来源链接核实。",
+        "warn": "标了 ⚠️ 的公司可能信息过时或有误。联系之前，请先打开官网和来源链接核实。",
         "missing": "请填写产品和目标国家。",
         "none": "没有找到公司。试试把产品描述写宽一些，或换一个国家。",
+        "working": "正在找买家……",
+        "done": "完成：找到 {n} 家买家",
+        "step_search": "正在搜索网页（{i}/{total}）：{query}",
+        "step_results": "找到 {count} 个网页，正在去掉重复和名录网站……",
+        "step_pick": "AI 正在阅读网页，挑出真正的买家……",
+        "step_websites": "正在为 {count} 家公司查找官网……",
+        "step_claude": "Claude 正在上网搜索（约 1 分钟）……",
+        "step_verify": "正在检查每个官网能否打开……",
+        "step_draft": "正在写 {top} 封开发信……",
+        "details": "详情",
+        "sells": "他们卖什么",
+        "why": "推荐理由",
+        "evidence": "证据",
+        "verified": "✔ 已核对：这句话确实出现在来源网页里",
+        "unverified": "⚠ 这是 AI 的概括，没有逐字核对。请打开来源确认。",
+        "no_evidence": "没有找到原文证据。联系之前请先看来源链接。",
+        "source": "来源",
+        "next": "建议下一步",
+        "find_people": "在 LinkedIn 上找采购负责人 →",
+        "site_ok": "✅ 官网能打开",
+        "site_bad": "⚠️ 官网未确认",
+        "email": "开发信草稿",
+        "only_ok": "只显示官网能打开的公司",
         "cost": "本次运行估算花费：{cur}{cost:.3f}（网页搜索 {searches} 次，共 {tokens:,} 个 tokens）",
     },
 }
@@ -107,46 +153,85 @@ if run:
         st.stop()
     email_language = "English" if email_choice == T["email_options"][0] else f"the main business language of {country}"
     usage = Usage()
+    status = st.status(T["working"], expanded=True)
+
+    def show_progress(stage, **details):
+        key = {"search": "step_search", "results": "step_results", "pick": "step_pick",
+               "websites": "step_websites", "claude_search": "step_claude"}.get(stage)
+        if key:
+            status.write(T[key].format(**details))
+
     try:
-        with st.spinner(T["searching"]):
-            companies = research_buyers(seller, product, country, n=n, usage=usage)
+        companies = research_buyers(seller, product, country, n=n, usage=usage, progress=show_progress)
         if not companies:
+            status.update(state="error")
             st.warning(T["none"])
             st.stop()
-        with st.spinner(T["checking"]):
-            companies = verify_websites(companies)
-        with st.spinner(T["drafting"]):
-            good = [c for c in companies if c.get("website_ok")] or companies
-            drafts = draft_emails(seller, product, good, top=top, language=email_language, usage=usage)
+        status.write(T["step_verify"])
+        companies = verify_websites(companies)
+        status.write(T["step_draft"].format(top=min(top, len(companies))))
+        good = [c for c in companies if c.get("website_ok")] or companies
+        drafts = draft_emails(seller, product, good, top=top, language=email_language, usage=usage)
     except Exception as e:
+        status.update(label=T["error"], state="error")
         st.error(friendly_error(e))
         st.stop()
+    status.update(label=T["done"].format(n=len(companies)), state="complete", expanded=False)
     # Keep results, so clicking "Download" (which reloads the page) doesn't wipe them
     st.session_state["result"] = {"companies": companies, "drafts": drafts, "country": country, "usage": usage}
 
 result = st.session_state.get("result")
-if result:
-    df = pd.DataFrame(result["companies"])
-    ok = int(df["website_ok"].sum()) if "website_ok" in df else 0
-    st.subheader(T["found"].format(n=len(df), country=result["country"], ok=ok))
-    order = ["name", "intent", "fit_score", "website_ok", "type", "city", "what_they_sell",
-             "why_fit", "next_step", "website", "linkedin_search", "source"]
-    df = df[[c for c in order if c in df.columns] + [c for c in df.columns if c not in order]]
-    st.dataframe(
-        df,
-        width="stretch",
-        column_config={
-            "website": st.column_config.LinkColumn("website"),
-            "linkedin_search": st.column_config.LinkColumn("LinkedIn", display_text="Find buyer →"),
-            "source": st.column_config.LinkColumn("source", display_text="source"),
-        },
-    )
-    st.download_button(T["download"], df.to_csv(index=False).encode("utf-8-sig"), f"buyers_{result['country']}.csv")
 
-    st.subheader(T["drafts"])
-    for d in result["drafts"]:
-        with st.expander(d["company"]):
-            st.text(d["email"])
+
+def stars(score) -> str:
+    full = int(round(float(score or 0)))
+    return "★" * full + "☆" * (5 - full)
+
+
+if result:
+    companies = result["companies"]
+    emails = {d["company"]: d["email"] for d in result["drafts"]}
+    ok = sum(1 for c in companies if c.get("website_ok"))
+    st.subheader(T["found"].format(n=len(companies), country=result["country"], ok=ok))
+    only_ok = st.toggle(T["only_ok"], value=False)
+
+    for c in companies:
+        if only_ok and not c.get("website_ok"):
+            continue
+        with st.container(border=True):
+            left, right = st.columns([3, 1])
+            place = " · ".join(x for x in (c.get("city"), c.get("type")) if x)
+            left.markdown(f"**{c.get('name', '')}**  \n{place}")
+            right.markdown(f"<span style='color:#d4a017;font-size:1.2em'>{stars(c.get('fit_score'))}</span>  \n"
+                           f"{c.get('intent', '')}", unsafe_allow_html=True)
+            site = c.get("website")
+            if site:
+                label = T["site_ok"] if c.get("website_ok") else T["site_bad"]
+                st.markdown(f"{label} · [{site}]({site})")
+            else:
+                st.markdown(T["site_bad"])
+            st.markdown(f"**{T['why']}:** {c.get('why_fit', '')}")
+            with st.expander(T["details"]):
+                st.markdown(f"**{T['sells']}:** {c.get('what_they_sell', '')}")
+                st.markdown(f"**{T['evidence']}:**")
+                if c.get("evidence"):
+                    st.markdown(f"> {c['evidence']}")
+                    st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
+                else:
+                    st.caption(T["no_evidence"])
+                if c.get("source"):
+                    st.markdown(f"**{T['source']}:** [{c['source']}]({c['source']})")
+                st.markdown(f"**{T['next']}:** {c.get('next_step', '')}")
+                st.markdown(f"[{T['find_people']}]({c.get('linkedin_search', '')})")
+                if c.get("name") in emails:
+                    st.markdown(f"**{T['email']}:**")
+                    st.code(emails[c["name"]], language=None, wrap_lines=True)
+
+    df = pd.DataFrame(companies)
+    order = ["name", "intent", "fit_score", "website_ok", "type", "city", "what_they_sell",
+             "why_fit", "evidence", "evidence_verified", "next_step", "website", "linkedin_search", "source"]
+    df = df[[c for c in order if c in df.columns] + [c for c in df.columns if c not in order]]
+    st.download_button(T["download"], df.to_csv(index=False).encode("utf-8-sig"), f"buyers_{result['country']}.csv")
 
     u = result["usage"]
     st.caption(T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches, tokens=u.input_tokens + u.output_tokens))

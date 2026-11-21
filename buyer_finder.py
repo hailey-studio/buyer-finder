@@ -133,10 +133,15 @@ For each company, give:
 - fit_score (a whole number from 1 to 5, 5 = best fit)
 - next_step (one short, practical tip for how to approach this company)
 - source (the URL where you found it)
+- evidence (a short quote, at most 25 words, copied WORD FOR WORD from the source text,
+  that shows this company sells or distributes this kind of product; "" if there is none)
 
 Only include companies that BUY or DISTRIBUTE this kind of product. Leave out
 manufacturers and suppliers that would compete with the seller, B2B marketplaces
 (e.g. Alibaba, Made-in-China), directories and yellow pages, job sites and social media pages.
+
+Every company must have ALL the fields above. fit_score must be a whole number
+like 4 (not text, not "4/5"). Use different scores: not every company is a 5 or a 1.
 
 Return ONLY a JSON array inside <json></json> tags, sorted by fit_score, highest first."""
 
@@ -191,7 +196,8 @@ def _extract_json(text: str):
 
 def _score(company) -> float:
     """fit_score as a number from 0 to 5, even if the model wrote "4", "4/5", "4 out of 5" or "high"."""
-    value = company.get("fit_score", 0)
+    value = next((company[k] for k in ("fit_score", "score", "fit", "rating", "fitScore")
+                  if company.get(k) not in (None, "")), 0)
     if isinstance(value, (int, float)):
         return float(max(0, min(5, value)))
     text = str(value or "").strip().lower()
@@ -214,6 +220,77 @@ NOT_A_BUYER_DOMAINS = (
     "instagram.com", "twitter.com", "x.com", "youtube.com", "tiktok.com",
     "indeed.", "glassdoor.", "wikipedia.org", "amazon.",
 )
+
+# Sites that list companies but are not the company's own website (found in real test runs).
+DIRECTORY_DOMAINS = NOT_A_BUYER_DOMAINS + (
+    "infojobs.", "brandfetch.", "rocketreach.", "prospeo.", "zoominfo.", "construying.",
+    "furnscout.", "aecoctrade.", "empresite.", "eleconomista.", "einforma.", "axesor.",
+    "infoempresa.", "dnb.com", "crunchbase.", "opencorporates.", "cylex", "infobel.",
+    "datoscif.", "iberinform.", "libreborme.", "emis.com", "signalhire.", "apollo.io",
+    "lusha.", "kompass.", "google.", "bing.", "maps.", "wikipedia.", "pinterest.",
+)
+
+LEGAL_WORDS = {"sl", "slu", "sa", "sau", "s", "l", "u", "a", "ltd", "llc", "inc", "gmbh", "srl",
+               "spa", "group", "grupo", "co", "company", "the", "de", "y", "and", "del", "la", "el",
+               # Common trade words: too generic to prove a domain belongs to this company
+               "herrajes", "distribuciones", "distribution", "distribuidora", "comercial", "industrial",
+               "industrias", "hardware", "handles", "kitchen", "import", "export", "trading", "international",
+               "iberica", "iberia", "spain", "espana", "españa", "fabricados", "suministros", "solutions"}
+
+
+def _name_words(name: str) -> list:
+    """Distinctive words in a company name, e.g. "Herrajes Ferramol S.L.U." -> ["herrajes", "ferramol"]."""
+    plain = re.sub(r"\(.*?\)", " ", name.lower())
+    words = re.findall(r"[a-z0-9áéíóúñü]+", plain)
+    return [w for w in words if w not in LEGAL_WORDS and len(w) >= 4]
+
+
+def _looks_like_official_site(link: str, name: str) -> bool:
+    """True if the link's domain is not a directory and contains a word from the company name."""
+    host = urllib.parse.urlparse(link).netloc.lower().replace("www.", "")
+    if not host or any(d in host for d in DIRECTORY_DOMAINS):
+        return False
+    ascii_host = host.translate(str.maketrans("áéíóúñü", "aeiounu"))
+    return any(w.translate(str.maketrans("áéíóúñü", "aeiounu")) in ascii_host for w in _name_words(name))
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9áéíóúñü]+", " ", (text or "").lower()).strip()
+
+
+def _check_evidence(companies: list, results: list) -> None:
+    """Mark evidence_verified = True only if the quote really appears in the search result it came from.
+    This is how the app tells a checked fact apart from something the AI may have made up."""
+    by_link = {r["link"]: _normalize(f"{r['title']} {r['snippet']}") for r in results}
+    for c in companies:
+        quote = _normalize(c.get("evidence", ""))
+        page = by_link.get(c.get("source"), "")
+        c["evidence_verified"] = bool(quote) and len(quote) >= 12 and quote in page
+
+
+def find_missing_websites(companies: list, country: str, usage: "Usage") -> list:
+    """For companies the model gave no website, run one quick search for the official site.
+    Only accepts a result whose domain matches the company name, so directories are never used."""
+    missing = [c for c in companies if not c.get("website")]
+    if not missing:
+        return companies
+
+    def lookup(company):
+        try:
+            results = web_search(f"{company.get('name', '')} {country} official website")
+        except ValueError:
+            return
+        usage.searches += 1
+        for r in results:
+            if _looks_like_official_site(r["link"], company.get("name", "")):
+                parts = urllib.parse.urlparse(r["link"])
+                company["website"] = f"{parts.scheme}://{parts.netloc}"
+                return
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(lookup, missing))
+    return companies
+
 
 TIERS = {5: "Very high / 极高", 4: "High / 高", 3: "Medium / 中"}
 
@@ -249,12 +326,15 @@ def _clean(companies: list) -> list:
 
 
 def research_buyers(seller: str, product: str, country: str, n: int = 10,
-                    max_searches: int = 5, usage: Usage | None = None):
-    """Step 1: find potential buyers (list of dicts), using whichever provider is switched on."""
+                    max_searches: int = 5, usage: Usage | None = None, progress=None):
+    """Step 1: find potential buyers (list of dicts), using whichever provider is switched on.
+    progress(stage, **details) is called at each step so the app can show what is happening."""
     usage = usage or Usage()
+    progress = progress or (lambda stage, **details: None)
     if PROVIDER == "claude":
+        progress("claude_search")
         return _research_with_claude(seller, product, country, n, max_searches, usage)
-    return _research_with_search_api(seller, product, country, n, usage)
+    return _research_with_search_api(seller, product, country, n, usage, progress)
 
 
 def _research_with_claude(seller, product, country, n, max_searches, usage):
@@ -331,15 +411,19 @@ def search_queries(product: str, country: str) -> list:
             f"{product} wholesaler {country}"]
 
 
-def _research_with_search_api(seller, product, country, n, usage):
+def _research_with_search_api(seller, product, country, n, usage, progress=None):
     """Search the web first (DeepSeek Search or SerpAPI), then let the model pick real buyers from the results."""
+    progress = progress or (lambda stage, **details: None)
     results, seen = [], set()
-    for q in search_queries(product, country):
+    queries = search_queries(product, country)
+    for i, q in enumerate(queries, 1):
+        progress("search", i=i, total=len(queries), query=q)
         usage.searches += 1
         for r in web_search(q):
             if r["link"] and r["link"] not in seen:
                 seen.add(r["link"])
                 results.append(r)
+    progress("results", count=len(results))
     if not results:
         return []
 
@@ -347,6 +431,7 @@ def _research_with_search_api(seller, product, country, n, usage):
                         for i, r in enumerate(results[:40], 1))
     messages = [{"role": "user", "content": PICK_PROMPT.format(
         seller=seller, product=product, country=country, n=n, results=listing)}]
+    progress("pick")
     companies = None
     for attempt in range(2):
         response = ask(messages, 8000)
@@ -370,7 +455,12 @@ def _research_with_search_api(seller, product, country, n, usage):
     # Keep only companies whose source really is one of the search results (no made-up sources)
     allowed = {r["link"] for r in results}
     companies = [c for c in companies if c.get("source") in allowed]
-    return _clean(companies)
+    companies = _clean(companies)
+    _check_evidence(companies, results)
+    missing = sum(1 for c in companies if not c.get("website"))
+    if missing:
+        progress("websites", count=missing)
+    return find_missing_websites(companies, country, usage)
 
 
 def check_website(url: str, timeout: int = 10) -> bool:

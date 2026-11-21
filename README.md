@@ -7,7 +7,17 @@ Describe what you sell and which country you want to sell into. The agent search
 
 ## Why I built this
 
-【用你自己的话写 3–4 句：你认识的浙江外贸人找客户有多费劲（展会名片跟进不了、开发信没人回、一家家搜公司很花时间），你为什么想用 AI 解决这个问题】
+My family runs a small export business in Zhejiang. We still find new buyers the traditional way: referrals from people we know, exhibiting at trade fairs and summits, promoting our products on social media, and digging through data online by hand.
+
+I felt this wasn't efficient enough, and it has real problems:
+- Data scraped online is often inaccurate, and a lot of useful information isn't public.
+- Checking companies one by one takes too much time and manpower.
+- Referrals are limited, and competition is intense.
+- Breaking into a new market is hard when everyone is chasing the same buyers and you don't have a clear edge.
+
+So I wanted to use AI to speed this up.
+
+This is a first version. Next I want to test it on real cases with exporters I know and add trade-fair exhibitor lists as a source.
 
 ## How it works
 

@@ -303,9 +303,12 @@ def _check_evidence(companies: list, results: list) -> None:
     This is how the app tells a checked fact apart from something the AI may have made up."""
     by_link = {r["link"]: _normalize(f"{r['title']} {r['snippet']}") for r in results}
     for c in companies:
-        quote = _normalize(c.get("evidence", ""))
         page = by_link.get(c.get("source"), "")
-        c["evidence_verified"] = bool(quote) and len(quote) >= 12 and quote in page
+        # The model often joins pieces of the page with "..." — check every piece is really there
+        pieces = [_normalize(p) for p in re.split(r"\.\.\.|…", c.get("evidence", ""))]
+        pieces = [p for p in pieces if p]
+        long_enough = sum(len(p) for p in pieces) >= 12
+        c["evidence_verified"] = bool(pieces) and long_enough and all(p in page for p in pieces)
 
 
 def find_missing_websites(companies: list, country: str, usage: "Usage") -> list:

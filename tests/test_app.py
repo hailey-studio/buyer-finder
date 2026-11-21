@@ -24,7 +24,7 @@ def research_buyers(seller, product, country, n=10, usage=None, progress=None, l
     return [
         {"name": "A Co", "website": "https://a.example", "fit_score": 5.0, "why_fit": "fits A", "evidence": "we sell hinges",
          "evidence_level": "page", "evidence_verified": True, "source": "https://s.example", "linkedin_search": "https://l",
-         "score_reasons": ["sells_same_products", "trade_buyer", "serves_businesses", "imports_or_same_material"]},
+         "score_reasons": ["sells_same_products", "exact_products", "trade_buyer", "imports_or_same_material"]},
         {"name": "B Co", "website": "", "fit_score": 4.0, "why_fit": "fits B", "evidence": "", "linkedin_search": "https://l",
          "score_reasons": ["sells_same_products", "trade_buyer"]},
         {"name": "C Co", "website": "https://c.example", "fit_score": 3.0, "why_fit": "fits C", "evidence": "summary quote",

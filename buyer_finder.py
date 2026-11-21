@@ -140,10 +140,11 @@ For each company, give:
 - what_they_sell (one sentence, in {language})
 - why_fit (one sentence, specific to this seller, in {language})
 - next_step (one short, practical tip for how to approach this company, in {language})
-- sells_same_products (true/false: they already sell or distribute this kind of product)
+- sells_same_products (true/false: they already sell or distribute this category of product)
+- exact_products (true/false: the evidence names the specific products the seller makes, e.g. "hinges"
+  or "drawer slides", not only the general category such as "hardware")
 - trade_buyer (true/false: importer, distributor or wholesaler that buys in bulk, not only a shop)
-- serves_businesses (true/false: they sell to businesses such as manufacturers, installers or retailers)
-- imports_or_same_material (true/false: they already import, or sell products of the same material or quality)
+- imports_or_same_material (true/false: there is evidence they import, or sell products of the same material)
 - source (the URL where you found it)
 - evidence (a short quote, at most 25 words, copied WORD FOR WORD from the source text,
   that shows this company sells or distributes this kind of product; "" if there is none)
@@ -181,6 +182,7 @@ Rules:
 - Mention one specific thing about the company (from what_they_sell or why_fit).
 - One clear ask: a short call or a product catalogue.
 - Plain and friendly. No exaggeration, no claims about the seller that are not given above.
+- No em dashes (—). Use short sentences instead.
 - Start with a subject line: "Subject: ..."
 """
 
@@ -208,7 +210,10 @@ def _extract_json(text: str):
 
 # Fit score rubric: the model answers four yes/no questions, the code adds up the points.
 # The same answers always give the same score, and the app can show why.
-RUBRIC = (("sells_same_products", 2), ("trade_buyer", 1), ("serves_businesses", 1), ("imports_or_same_material", 1))
+# Version 2 (21 Nov 2026): in test 3, 9 of 10 companies scored 5/5 because "sells to businesses" was true
+# for almost every distributor and every company started at 1. Now there is no starting point, and one
+# point needs the evidence to name the exact products, so scores spread out.
+RUBRIC = (("sells_same_products", 2), ("exact_products", 1), ("trade_buyer", 1), ("imports_or_same_material", 1))
 
 
 def _truthy(value) -> bool:
@@ -216,12 +221,12 @@ def _truthy(value) -> bool:
 
 
 def _rubric_score(company):
-    """1 point to start, plus the points for each "yes". None if the model gave no rubric answers."""
+    """The points for each "yes" (0 to 5). None if the model gave no rubric answers."""
     if not any(key in company for key, _ in RUBRIC):
         return None
     reasons = [key for key, _ in RUBRIC if _truthy(company.get(key))]
     company["score_reasons"] = reasons
-    return float(min(5, 1 + sum(points for key, points in RUBRIC if key in reasons)))
+    return float(min(5, sum(points for key, points in RUBRIC if key in reasons)))
 
 
 def _score(company) -> float:
@@ -493,6 +498,9 @@ def _clean(companies: list) -> list:
         seen.add(key)
         if _is_not_a_buyer(c):
             continue
+        site = (c.get("website") or "").strip()
+        if site and not site.startswith(("http://", "https://")):
+            c["website"] = "https://" + site.lstrip("/")   # "micel.es" -> "https://micel.es", so it is a link
         rubric = _rubric_score(c)
         c["fit_score"] = rubric if rubric is not None else _score(c)
         c["intent"] = TIERS.get(round(c["fit_score"]), "Low / 低")

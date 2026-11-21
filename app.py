@@ -121,10 +121,9 @@ TEXT = {
         "level_page": "Found word for word on the source page.",
         "level_snippet": "Found in the search result summary of this page. The page itself could not be opened, so open it to confirm.",
         "score_title": "How the {score}/5 fit score was worked out",
-        "score_base": "Starting point: 1",
         "rubric": {"sells_same_products": "Already sells this kind of product (+2)",
+                   "exact_products": "Sells the exact products you make (+1)",
                    "trade_buyer": "Importer, distributor or wholesaler (+1)",
-                   "serves_businesses": "Sells to other businesses (+1)",
                    "imports_or_same_material": "Already imports, or sells the same material (+1)"},
         "score_old": "Scored by an earlier version, before the scoring rules were added.",
         "hist_count": "{n} buyers",
@@ -219,10 +218,9 @@ TEXT = {
         "level_page": "已在来源网页上逐字找到这句话。",
         "level_snippet": "这句话出现在该网页的搜索结果摘要里，但网页本身打不开，请自己打开确认。",
         "score_title": "匹配度 {score}/5 是怎么算的",
-        "score_base": "基础分：1",
         "rubric": {"sells_same_products": "已经在卖同类产品（+2）",
+                   "exact_products": "卖的正是你做的这几样产品（+1）",
                    "trade_buyer": "是进口商、分销商或批发商（+1）",
-                   "serves_businesses": "客户是企业（+1）",
                    "imports_or_same_material": "已经在进口，或卖同样材质的产品（+1）"},
         "score_old": "这是旧版本打的分，当时还没有评分规则。",
         "hist_count": "{n} 家",
@@ -634,7 +632,7 @@ with right:
                     st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
                 st.markdown(f"**{T['score_title'].format(score=f'{score:.0f}')}**")
                 if "score_reasons" in c:
-                    lines = [T["score_base"]] + [f"✓ {T['rubric'][k]}" for k in T["rubric"] if k in c["score_reasons"]] \
+                    lines = [f"✓ {T['rubric'][k]}" for k in T["rubric"] if k in c["score_reasons"]] \
                         + [f"✗ {T['rubric'][k]}" for k in T["rubric"] if k not in c["score_reasons"]]
                     st.markdown("  \n".join(e(x) for x in lines))
                 else:

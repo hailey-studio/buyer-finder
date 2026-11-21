@@ -133,14 +133,26 @@ def test_T1_fetch_text_strips_html():
 
 # ---------- T2: the fit score follows fixed rules ----------
 def test_T2_rubric_score_is_deterministic():
-    row = {"sells_same_products": True, "trade_buyer": "true", "serves_businesses": False,
+    row = {"sells_same_products": True, "exact_products": "true", "trade_buyer": True,
            "imports_or_same_material": "yes"}
-    assert bf._rubric_score(dict(row)) == 5.0        # 1 + 2 + 1 + 1
-    row["sells_same_products"] = False
+    assert bf._rubric_score(dict(row)) == 5.0        # 2 + 1 + 1 + 1
+    row.update(sells_same_products=False, imports_or_same_material=False)
     c = dict(row)
-    assert bf._rubric_score(c) == 3.0
-    assert c["score_reasons"] == ["trade_buyer", "imports_or_same_material"]
-    assert bf._clean([{"name": "X", **row}])[0]["fit_score"] == 3.0
+    assert bf._rubric_score(c) == 2.0
+    assert c["score_reasons"] == ["exact_products", "trade_buyer"]
+    assert bf._clean([{"name": "X", **row}])[0]["fit_score"] == 2.0
+
+
+def test_T2_scores_spread_out():
+    """Test 3 (21 Nov): 9 of 10 scored 5/5. A typical general hardware distributor must not reach 5."""
+    general_distributor = {"sells_same_products": True, "exact_products": False, "trade_buyer": True,
+                           "imports_or_same_material": False}
+    assert bf._rubric_score(general_distributor) == 3.0
+
+
+def test_website_without_https_becomes_a_link():
+    out = bf._clean([{"name": "MICEL", "website": "micel.es", "sells_same_products": True}])
+    assert out[0]["website"] == "https://micel.es"
 
 
 # ---------- U7: the AI writes its own text in the interface language ----------

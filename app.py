@@ -2,11 +2,13 @@
 
 import html
 import os
+import time
 
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Buyer Finder · AI buyer research for exporters", page_icon="🌍", layout="wide")
+st.set_page_config(page_title="Buyer Finder: AI buyer research for exporters", page_icon="🌍", layout="wide",
+                   initial_sidebar_state="expanded")
 
 GITHUB_URL = "https://github.com/hailey-studio/buyer-finder"
 
@@ -36,7 +38,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; 
 
 .bf-route { margin: 30px 0 4px; }
 .bf-route .what { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; font-weight: 700;
-  font-size: 38px; line-height: 1.1; color: var(--ink); }
+  font-size: 28px; line-height: 1.15; color: var(--ink); max-width: 42ch; }
 .bf-route .to { color: var(--stamp); }
 .bf-summary { color: var(--steel); font-size: 15.5px; margin: 8px 0 18px; max-width: 75ch; }
 
@@ -112,7 +114,10 @@ TEXT = {
         "tagline": "Tell it what your factory makes and where you want to sell. It finds importers and distributors there, shows the evidence for each one, and drafts a first email.",
         "flow": "<b>1</b> Search the web for buyers &nbsp; <b>2</b> Drop competitors, marketplaces and directories &nbsp; <b>3</b> Check each quote against its source and confirm the website &nbsp; <b>4</b> Draft emails for the best matches",
         "route_to": "to",
-        "summary": "{n} buyers found. Evidence checked for {checked}, official website confirmed for {ok}. This search cost {cost}.",
+        "summary": "{n} buyers found in {secs} seconds. {both} are fully verified (evidence checked and website confirmed). Cost {cost}, or {per} per verified buyer.",
+        "summary_none": "{n} buyers found in {secs} seconds. None is fully verified yet: open the source of each one before reaching out. Cost {cost}.",
+        "tab_overview": "Overview", "tab_evidence": "Evidence", "tab_email": "Email draft",
+        "no_email": "No draft for this company. Emails are written for the top matches with a working website.",
         "rank_fit": "fit",
         "pw_title": "This demo is password protected",
         "pw_body": "Ask Hailey for the password.",
@@ -181,7 +186,10 @@ TEXT = {
         "tagline": "填写你的工厂做什么、想卖到哪个国家。它会找出当地的进口商和分销商，给出每一家的证据，并起草第一封开发信。",
         "flow": "<b>1</b> 上网搜索买家 &nbsp; <b>2</b> 去掉同行、平台和名录网站 &nbsp; <b>3</b> 逐字核对证据，确认官网 &nbsp; <b>4</b> 为最匹配的几家写开发信",
         "route_to": "销往",
-        "summary": "找到 {n} 家买家。其中 {checked} 家的证据已核对，{ok} 家官网已确认。本次搜索花费 {cost}。",
+        "summary": "用时 {secs} 秒，找到 {n} 家买家，其中 {both} 家完全核实（证据已核对且官网已确认）。花费 {cost}，平均每家核实买家 {per}。",
+        "summary_none": "用时 {secs} 秒，找到 {n} 家买家，目前还没有完全核实的。联系之前请先打开每家的来源核对。花费 {cost}。",
+        "tab_overview": "概览", "tab_evidence": "证据", "tab_email": "开发信",
+        "no_email": "这家没有开发信草稿。开发信只为官网能打开、匹配度最高的几家撰写。",
         "rank_fit": "匹配度",
         "pw_title": "这个演示需要密码",
         "pw_body": "请向 Hailey 要密码。",
@@ -311,6 +319,7 @@ if ss["current"] is None:
             st.stop()
         email_language = "English" if email_choice == T["email_options"][0] else f"the main business language of {country}"
         usage = Usage()
+        started = time.time()
         status = st.status(T["working"], expanded=True)
 
         def show_progress(stage, **details):
@@ -336,7 +345,8 @@ if ss["current"] is None:
             st.stop()
         status.update(label=T["done"].format(n=len(companies)), state="complete", expanded=False)
         ss["history"].append({"id": len(ss["history"]), "companies": companies, "drafts": drafts,
-                              "country": country, "product": product, "usage": usage})
+                              "country": country, "product": product, "usage": usage,
+                              "seconds": round(time.time() - started)})
         ss["current"] = len(ss["history"]) - 1
         st.rerun()
     st.stop()
@@ -359,10 +369,15 @@ ok = sum(1 for c in companies if c.get("website_ok"))
 checked = sum(1 for c in companies if c.get("evidence_verified"))
 u = result["usage"]
 
+both = sum(1 for c in companies if c.get("evidence_verified") and c.get("website_ok"))
+cost = f"{u.currency}{u.cost:.3f}"
+summary = (T["summary"].format(n=len(companies), secs=result.get("seconds", "?"), both=both, cost=cost,
+                               per=f"{u.currency}{u.cost / both:.4f}") if both else
+           T["summary_none"].format(n=len(companies), secs=result.get("seconds", "?"), cost=cost))
 st.markdown(
     f'<div class="bf-route"><div class="what">{e(result.get("product", ""))} '
     f'<span class="to">{e(T["route_to"])} {e(result["country"])}</span></div></div>'
-    f'<p class="bf-summary">{e(T["summary"].format(n=len(companies), checked=checked, ok=ok, cost=f"{u.currency}{u.cost:.3f}"))}</p>',
+    f'<p class="bf-summary">{e(summary)}</p>',
     unsafe_allow_html=True)
 
 tool_left, tool_right = st.columns([3, 1])
@@ -384,10 +399,12 @@ table = pd.DataFrame([{
     T["col_evidence"]: bool(c.get("evidence_verified")),
 } for c in shown])
 
-left, right = st.columns([7, 4], gap="medium")
+# Table and detail panel share one height, so the page stays balanced; the detail panel scrolls inside
+PANEL_HEIGHT = max(430, min(39 + 35 * len(shown), 600))
+left, right = st.columns([7, 5], gap="medium")
 with left:
     event = st.dataframe(
-        table, hide_index=True, width="stretch", height=min(38 + 35 * max(len(shown), 1), 640),
+        table, hide_index=True, width="stretch", height=PANEL_HEIGHT,
         on_select="rerun", selection_mode="single-row", key=f"table{result['id']}",
         column_config={
             T["col_company"]: st.column_config.TextColumn(T["col_company"], width=190),
@@ -405,7 +422,7 @@ with right:
         st.caption(T["none"])
     else:
         c = shown[min(pick, len(shown) - 1)]
-        with st.container(border=True, key="bfdetail"):
+        with st.container(border=True, key="bfdetail", height=PANEL_HEIGHT):
             site = safe_link(c.get("website", ""))
             meta = ", ".join(e(x) for x in (c.get("type"), c.get("city")) if x)
             if site:
@@ -425,21 +442,27 @@ with right:
             if T["statuses"].index(new_status) != status_of(c):
                 ss["status"][key] = T["statuses"].index(new_status)
                 st.rerun()
-            st.markdown(f"**{T['why']}**  \n{c.get('why_fit', '')}")
-            st.markdown(f"**{T['evidence']}**")
-            if c.get("evidence"):
-                st.markdown(f"> {c['evidence']}")
-                st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
-            else:
-                st.caption(T["no_evidence"])
-            if safe_link(c.get("source", "")):
-                st.markdown(f"[{T['source']}]({c['source']})")
-            st.markdown(f"**{T['next']}**  \n{c.get('next_step', '')}")
-            if safe_link(c.get("linkedin_search", "")):
-                st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
-            if c.get("name") in emails:
-                st.markdown(f"**{T['email']}**")
-                st.code(emails[c["name"]], language=None, wrap_lines=True)
+            tab1, tab2, tab3 = st.tabs([T["tab_overview"], T["tab_evidence"], T["tab_email"]])
+            with tab1:
+                st.markdown(f"**{T['why']}**  \n{c.get('why_fit', '')}")
+                if c.get("what_they_sell"):
+                    st.markdown(f"**{T['sells']}**  \n{c['what_they_sell']}")
+                st.markdown(f"**{T['next']}**  \n{c.get('next_step', '')}")
+                if safe_link(c.get("linkedin_search", "")):
+                    st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
+            with tab2:
+                if c.get("evidence"):
+                    st.markdown(f"> {c['evidence']}")
+                    st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
+                else:
+                    st.caption(T["no_evidence"])
+                if safe_link(c.get("source", "")):
+                    st.markdown(f"[{T['source']}]({c['source']})")
+            with tab3:
+                if c.get("name") in emails:
+                    st.code(emails[c["name"]], language=None, wrap_lines=True)
+                else:
+                    st.caption(T["no_email"])
         if not rows:
             st.caption(T["pick_row"])
 

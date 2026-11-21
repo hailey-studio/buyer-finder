@@ -18,7 +18,7 @@ STYLE = """
 html, body, [class*="css"], .stMarkdown, button, input, textarea, label {
   font-family: 'IBM Plex Sans', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
 #MainMenu, footer, [data-testid="stDecoration"] { visibility: hidden; }
-.block-container { max-width: 980px; padding-top: 3rem; }
+.block-container { max-width: 1280px; padding-top: 2.4rem; }
 h1, h2, h3 { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; color: var(--ink); }
 
 .bf-head { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 22px; }
@@ -64,7 +64,13 @@ h1, h2, h3 { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; 
 [class*="st-key-bfrow"] [data-testid="stExpander"] summary { color: var(--stamp); font-size: 14px; }
 .bf-note { color: var(--steel); font-size: 13.5px; margin-top: 10px; max-width: 75ch; }
 
-.bf-footer { color: var(--steel); font-size: 13px; margin: 48px 0 12px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.bf-footer { color: var(--steel); font-size: 12.5px; margin: 28px 0 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+[data-testid="stSidebar"] { background: #fff; border-right: 1px solid var(--rule); }
+[data-testid="stSidebar"] .stButton button { justify-content: flex-start; text-align: left; font-size: 13.5px; }
+.bf-side-mark { font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 700; font-size: 22px; color: var(--ink); margin: 4px 0 12px; }
+.bf-side-title { color: var(--steel); font-size: 13px; font-weight: 600; margin: 20px 0 6px; }
+.bf-detail-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+[class*="st-key-bfdetail"] { background: #fff; }
 .bf-footer a { color: var(--stamp); }
 @media (max-width: 700px) { .bf-route .what { font-size: 28px; } .bf-row { grid-template-columns: 26px 1fr; }
   .bf-fit { grid-column: 2; text-align: left; } .bf-fit .bar { justify-content: flex-start; }
@@ -92,6 +98,17 @@ for name in ("BUYER_FINDER_PROVIDER", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "
 
 TEXT = {
     "English": {
+        "new_search": "New search",
+        "recent": "Recent searches",
+        "no_recent": "Your searches in this session will appear here.",
+        "statuses": ["New", "Contacted", "Replied", "Not a fit"],
+        "status_label": "Status",
+        "col_company": "Company", "col_fit": "Fit", "col_city": "City", "col_type": "Type",
+        "col_website": "Website", "col_evidence": "Evidence", "col_status": "Status",
+        "ev_yes": "Checked", "ev_no": "Not checked",
+        "export": "Export CSV",
+        "pick_row": "Select a row to see the evidence, next step and email draft.",
+        "session_note": "Searches and statuses are kept while this tab is open.",
         "tagline": "Tell it what your factory makes and where you want to sell. It finds importers and distributors there, shows the evidence for each one, and drafts a first email.",
         "flow": "<b>1</b> Search the web for buyers &nbsp; <b>2</b> Drop competitors, marketplaces and directories &nbsp; <b>3</b> Check each quote against its source and confirm the website &nbsp; <b>4</b> Draft emails for the best matches",
         "route_to": "to",
@@ -150,6 +167,17 @@ TEXT = {
         "cost": "Estimated cost of this run: {cur}{cost:.3f} ({searches} web searches, {tokens:,} tokens)",
     },
     "中文": {
+        "new_search": "新搜索",
+        "recent": "最近的搜索",
+        "no_recent": "这次打开页面后的搜索记录会显示在这里。",
+        "statuses": ["新线索", "已联系", "已回复", "不合适"],
+        "status_label": "状态",
+        "col_company": "公司", "col_fit": "匹配度", "col_city": "城市", "col_type": "类型",
+        "col_website": "官网", "col_evidence": "证据", "col_status": "状态",
+        "ev_yes": "已核对", "ev_no": "未核对",
+        "export": "导出 CSV",
+        "pick_row": "点选表格里的一行，查看证据、建议下一步和开发信。",
+        "session_note": "搜索记录和状态在这个页面打开期间保留。",
         "tagline": "填写你的工厂做什么、想卖到哪个国家。它会找出当地的进口商和分销商，给出每一家的证据，并起草第一封开发信。",
         "flow": "<b>1</b> 上网搜索买家 &nbsp; <b>2</b> 去掉同行、平台和名录网站 &nbsp; <b>3</b> 逐字核对证据，确认官网 &nbsp; <b>4</b> 为最匹配的几家写开发信",
         "route_to": "销往",
@@ -210,153 +238,211 @@ TEXT = {
 }
 
 
-_, lang_col = st.columns([5, 1.3])
-lang = lang_col.radio("Language / 界面语言", list(TEXT), horizontal=True, label_visibility="collapsed")
+st.sidebar.markdown('<p class="bf-side-mark">Buyer Finder</p>', unsafe_allow_html=True)
+lang = st.sidebar.radio("Language / 界面语言", list(TEXT), horizontal=True, label_visibility="collapsed")
 T = TEXT[lang]
 e = html.escape
+ss = st.session_state
+ss.setdefault("history", [])      # every search in this session
+ss.setdefault("current", None)    # index of the search on screen, None = new search form
+ss.setdefault("status", {})       # "search id|company" -> status index
 
-st.markdown(f'<div class="bf-head"><p class="mark">Buyer Finder</p><p class="lede">{e(T["tagline"])}</p></div>',
-            unsafe_allow_html=True)
 
-
-def footer():
-    st.markdown(f'<div class="bf-footer">{e(T["footer"])} <a href="{GITHUB_URL}" target="_blank">'
-                f'{e(T["source_code"])}</a></div>', unsafe_allow_html=True)
+def footer_html() -> str:
+    return (f'<div class="bf-footer">{e(T["footer"])} <a href="{GITHUB_URL}" target="_blank">'
+            f'{e(T["source_code"])}</a></div>')
 
 
 # Optional password, so strangers can't use up the API credits
 password = _secret("APP_PASSWORD")
-if password and not st.session_state.get("unlocked"):
+if password and not ss.get("unlocked"):
+    st.markdown(f'<div class="bf-head"><p class="mark">Buyer Finder</p><p class="lede">{e(T["tagline"])}</p></div>',
+                unsafe_allow_html=True)
     entered = st.text_input(T["pw_title"], type="password", placeholder="••••••••")
     if entered == password:
         # Remember the visitor for this session and hide the password box
-        st.session_state["unlocked"] = True
+        ss["unlocked"] = True
         st.rerun()
     st.caption(T["pw_body"])
-    footer()
+    st.markdown(footer_html(), unsafe_allow_html=True)
     st.stop()
 
 from buyer_finder import Usage, draft_emails, friendly_error, research_buyers, verify_websites  # noqa: E402
 
-st.markdown(f'<p class="bf-flow">{T["flow"]}</p>', unsafe_allow_html=True)
+# ---------- Sidebar: like the left navigation in Apollo or HubSpot ----------
+with st.sidebar:
+    if st.button(T["new_search"], type="primary", width="stretch"):
+        ss["current"] = None
+        st.rerun()
+    st.markdown(f'<p class="bf-side-title">{e(T["recent"])}</p>', unsafe_allow_html=True)
+    if not ss["history"]:
+        st.caption(T["no_recent"])
+    for i in reversed(range(len(ss["history"]))):
+        h = ss["history"][i]
+        short = h["product"] if len(h["product"]) <= 30 else h["product"][:29].rstrip(" ,(") + "…"
+        label = f'{h["country"]}: {short}, {len(h["companies"])}'
+        if st.button(label, key=f"hist{i}", width="stretch",
+                     type="secondary" if i != ss["current"] else "tertiary"):
+            ss["current"] = i
+            st.rerun()
+    st.caption(T["session_note"])
+    st.markdown(footer_html(), unsafe_allow_html=True)
 
-with st.form("inputs"):
-    seller = st.text_area(T["about"], T["about_default"])
-    col1, col2 = st.columns(2)
-    product = col1.text_input(T["product"], T["product_default"])
-    country = col2.text_input(T["country"], "Spain" if lang == "English" else "西班牙")
-    col3, col4, col5 = st.columns(3)
-    n = col3.slider(T["how_many"], 5, 20, 10)
-    top = col4.slider(T["top"], 1, 5, 3)
-    email_choice = col5.radio(T["email_lang"], T["email_options"])
-    run = st.form_submit_button(T["run"])
+# ---------- New search ----------
+if ss["current"] is None:
+    st.markdown(f'<div class="bf-head"><p class="mark">Buyer Finder</p><p class="lede">{e(T["tagline"])}</p></div>',
+                unsafe_allow_html=True)
+    st.markdown(f'<p class="bf-flow">{T["flow"]}</p>', unsafe_allow_html=True)
 
-if run:
-    if not product.strip() or not country.strip():
-        st.warning(T["missing"])
-        st.stop()
-    email_language = "English" if email_choice == T["email_options"][0] else f"the main business language of {country}"
-    usage = Usage()
-    status = st.status(T["working"], expanded=True)
+    with st.form("inputs"):
+        seller = st.text_area(T["about"], T["about_default"])
+        col1, col2 = st.columns(2)
+        product = col1.text_input(T["product"], T["product_default"])
+        country = col2.text_input(T["country"], "Spain" if lang == "English" else "西班牙")
+        col3, col4, col5 = st.columns(3)
+        n = col3.slider(T["how_many"], 5, 20, 10)
+        top = col4.slider(T["top"], 1, 5, 3)
+        email_choice = col5.radio(T["email_lang"], T["email_options"])
+        run = st.form_submit_button(T["run"])
 
-    def show_progress(stage, **details):
-        key = {"search": "step_search", "results": "step_results", "pick": "step_pick",
-               "websites": "step_websites", "claude_search": "step_claude"}.get(stage)
-        if key:
-            status.write(T[key].format(**details))
-
-    try:
-        companies = research_buyers(seller, product, country, n=n, usage=usage, progress=show_progress)
-        if not companies:
-            status.update(state="error")
-            st.warning(T["none"])
+    if run:
+        if not product.strip() or not country.strip():
+            st.warning(T["missing"])
             st.stop()
-        status.write(T["step_verify"])
-        companies = verify_websites(companies)
-        status.write(T["step_draft"].format(top=min(top, len(companies))))
-        good = [c for c in companies if c.get("website_ok")] or companies
-        drafts = draft_emails(seller, product, good, top=top, language=email_language, usage=usage)
-    except Exception as e:
-        status.update(label=T["error"], state="error")
-        st.error(friendly_error(e))
-        st.stop()
-    status.update(label=T["done"].format(n=len(companies)), state="complete", expanded=False)
-    # Keep results, so clicking "Download" (which reloads the page) doesn't wipe them
-    st.session_state["result"] = {"companies": companies, "drafts": drafts, "country": country,
-                                  "product": product, "usage": usage}
+        email_language = "English" if email_choice == T["email_options"][0] else f"the main business language of {country}"
+        usage = Usage()
+        status = st.status(T["working"], expanded=True)
 
-result = st.session_state.get("result")
+        def show_progress(stage, **details):
+            key = {"search": "step_search", "results": "step_results", "pick": "step_pick",
+                   "websites": "step_websites", "claude_search": "step_claude"}.get(stage)
+            if key:
+                status.write(T[key].format(**details))
 
+        try:
+            companies = research_buyers(seller, product, country, n=n, usage=usage, progress=show_progress)
+            if not companies:
+                status.update(state="error")
+                st.warning(T["none"])
+                st.stop()
+            status.write(T["step_verify"])
+            companies = verify_websites(companies)
+            status.write(T["step_draft"].format(top=min(top, len(companies))))
+            good = [c for c in companies if c.get("website_ok")] or companies
+            drafts = draft_emails(seller, product, good, top=top, language=email_language, usage=usage)
+        except Exception as ex:
+            status.update(label=T["error"], state="error")
+            st.error(friendly_error(ex))
+            st.stop()
+        status.update(label=T["done"].format(n=len(companies)), state="complete", expanded=False)
+        ss["history"].append({"id": len(ss["history"]), "companies": companies, "drafts": drafts,
+                              "country": country, "product": product, "usage": usage})
+        ss["current"] = len(ss["history"]) - 1
+        st.rerun()
+    st.stop()
 
-def fit_bar(score) -> str:
-    full = int(round(float(score or 0)))
-    return "".join(f'<i class="{"on" if i < full else ""}"></i>' for i in range(5))
+# ---------- Results: table on the left, detail panel on the right ----------
+result = ss["history"][ss["current"]]
 
 
 def safe_link(url: str) -> str:
     return url if (url or "").startswith(("http://", "https://")) else ""
 
 
-if result:
-    companies = result["companies"]
-    emails = {d["company"]: d["email"] for d in result["drafts"]}
-    ok = sum(1 for c in companies if c.get("website_ok"))
-    checked = sum(1 for c in companies if c.get("evidence_verified"))
-    u = result["usage"]
+def status_of(c) -> int:
+    return ss["status"].get(f'{result["id"]}|{c.get("name", "")}', 0)
 
-    st.markdown(
-        f'<div class="bf-route"><div class="what">{e(result.get("product", ""))} '
-        f'<span class="to">{e(T["route_to"])} {e(result["country"])}</span></div></div>'
-        f'<p class="bf-summary">{e(T["summary"].format(n=len(companies), checked=checked, ok=ok, cost=f"{u.currency}{u.cost:.3f}"))}</p>',
-        unsafe_allow_html=True)
-    only_ok = st.toggle(T["only_ok"], value=False)
 
-    for rank, c in enumerate(companies, 1):
-        if only_ok and not c.get("website_ok"):
-            continue
-        with st.container(key=f"bfrow{rank}"):
+companies = result["companies"]
+emails = {d["company"]: d["email"] for d in result["drafts"]}
+ok = sum(1 for c in companies if c.get("website_ok"))
+checked = sum(1 for c in companies if c.get("evidence_verified"))
+u = result["usage"]
+
+st.markdown(
+    f'<div class="bf-route"><div class="what">{e(result.get("product", ""))} '
+    f'<span class="to">{e(T["route_to"])} {e(result["country"])}</span></div></div>'
+    f'<p class="bf-summary">{e(T["summary"].format(n=len(companies), checked=checked, ok=ok, cost=f"{u.currency}{u.cost:.3f}"))}</p>',
+    unsafe_allow_html=True)
+
+tool_left, tool_right = st.columns([3, 1])
+only_ok = tool_left.toggle(T["only_ok"], value=False, key=f"only{result['id']}")
+shown = [c for c in companies if c.get("website_ok") or not only_ok]
+
+export = pd.DataFrame([{**c, "status": T["statuses"][status_of(c)]} for c in companies])
+order = ["name", "status", "intent", "fit_score", "website_ok", "type", "city", "what_they_sell",
+         "why_fit", "evidence", "evidence_verified", "next_step", "website", "linkedin_search", "source"]
+export = export[[c for c in order if c in export.columns] + [c for c in export.columns if c not in order]]
+tool_right.download_button(T["export"], export.to_csv(index=False).encode("utf-8-sig"),
+                           f"buyers_{result['country']}.csv", width="stretch")
+
+table = pd.DataFrame([{
+    T["col_company"]: c.get("name", ""),
+    T["col_fit"]: float(c.get("fit_score") or 0),
+    T["col_status"]: T["statuses"][status_of(c)],
+    T["col_website"]: safe_link(c.get("website", "")),
+    T["col_evidence"]: bool(c.get("evidence_verified")),
+} for c in shown])
+
+left, right = st.columns([7, 4], gap="medium")
+with left:
+    event = st.dataframe(
+        table, hide_index=True, width="stretch", height=min(38 + 35 * max(len(shown), 1), 640),
+        on_select="rerun", selection_mode="single-row", key=f"table{result['id']}",
+        column_config={
+            T["col_company"]: st.column_config.TextColumn(T["col_company"], width=190),
+            T["col_fit"]: st.column_config.ProgressColumn(T["col_fit"], min_value=0, max_value=5, format="%d/5", width=80),
+            T["col_status"]: st.column_config.TextColumn(T["col_status"], width=90),
+            T["col_evidence"]: st.column_config.CheckboxColumn(T["col_evidence"], width=80),
+            T["col_website"]: st.column_config.LinkColumn(T["col_website"], display_text=r"https?://(?:www\.)?([^/]+)", width=130),
+        },
+    )
+rows = event.selection.rows if event and event.selection else []
+pick = rows[0] if rows else 0
+
+with right:
+    if not shown:
+        st.caption(T["none"])
+    else:
+        c = shown[min(pick, len(shown) - 1)]
+        with st.container(border=True, key="bfdetail"):
             site = safe_link(c.get("website", ""))
             meta = ", ".join(e(x) for x in (c.get("type"), c.get("city")) if x)
             if site:
                 meta += f' &nbsp; <a href="{e(site)}" target="_blank">{e(site.split("//", 1)[-1].rstrip("/"))}</a>'
             site_ok = bool(site and c.get("website_ok"))
-            status = (f'<span class="{"ok" if site_ok else "no"}">{e(T["site_ok"] if site_ok else T["site_bad"])}</span>'
+            badges = (f'<span class="{"ok" if site_ok else "no"}">{e(T["site_ok"] if site_ok else T["site_bad"])}</span>'
                       f'<span class="{"ok" if c.get("evidence_verified") else "no"}">'
                       f'{e(T["chip_ev"] if c.get("evidence_verified") else T["chip_no_ev"])}</span>')
             score = float(c.get("fit_score") or 0)
             st.markdown(
-                f"""<div class="bf-row"><div class="bf-rank">{rank}</div>
-                <div><div class="bf-name">{e(c.get('name', ''))}</div><div class="bf-meta">{meta}</div>
-                <div class="bf-status">{status}</div>
-                <div class="bf-why">{e(c.get('why_fit', ''))}</div></div>
-                <div class="bf-fit"><div class="num">{score:.0f}<small>/5 {e(T['rank_fit'])}</small></div>
-                <div class="bar">{fit_bar(score)}</div></div></div>""",
-                unsafe_allow_html=True,
-            )
-            with st.expander(T["details"]):
-                st.markdown(f"**{T['sells']}:** {c.get('what_they_sell', '')}")
-                st.markdown(f"**{T['evidence']}:**")
-                if c.get("evidence"):
-                    st.markdown(f"> {c['evidence']}")
-                    st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
-                else:
-                    st.caption(T["no_evidence"])
-                if safe_link(c.get("source", "")):
-                    st.markdown(f"**{T['source']}:** [{c['source']}]({c['source']})")
-                st.markdown(f"**{T['next']}:** {c.get('next_step', '')}")
-                if safe_link(c.get("linkedin_search", "")):
-                    st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
-                if c.get("name") in emails:
-                    st.markdown(f"**{T['email']}:**")
-                    st.code(emails[c["name"]], language=None, wrap_lines=True)
-
-    df = pd.DataFrame(companies)
-    order = ["name", "intent", "fit_score", "website_ok", "type", "city", "what_they_sell",
-             "why_fit", "evidence", "evidence_verified", "next_step", "website", "linkedin_search", "source"]
-    df = df[[c for c in order if c in df.columns] + [c for c in df.columns if c not in order]]
-    st.download_button(T["download"], df.to_csv(index=False).encode("utf-8-sig"), f"buyers_{result['country']}.csv")
-    st.markdown(f'<p class="bf-note">{e(T["warn"])} '
-                f'{e(T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches, tokens=u.input_tokens + u.output_tokens))}</p>',
+                f"""<div class="bf-detail-top"><div><div class="bf-name">{e(c.get('name', ''))}</div>
+                <div class="bf-meta">{meta}</div><div class="bf-status">{badges}</div></div>
+                <div class="bf-fit"><div class="num">{score:.0f}<small>/5</small></div></div></div>""",
                 unsafe_allow_html=True)
+            key = f'{result["id"]}|{c.get("name", "")}'
+            new_status = st.selectbox(T["status_label"], T["statuses"], index=status_of(c), key=f"st_{key}")
+            if T["statuses"].index(new_status) != status_of(c):
+                ss["status"][key] = T["statuses"].index(new_status)
+                st.rerun()
+            st.markdown(f"**{T['why']}**  \n{c.get('why_fit', '')}")
+            st.markdown(f"**{T['evidence']}**")
+            if c.get("evidence"):
+                st.markdown(f"> {c['evidence']}")
+                st.caption(T["verified"] if c.get("evidence_verified") else T["unverified"])
+            else:
+                st.caption(T["no_evidence"])
+            if safe_link(c.get("source", "")):
+                st.markdown(f"[{T['source']}]({c['source']})")
+            st.markdown(f"**{T['next']}**  \n{c.get('next_step', '')}")
+            if safe_link(c.get("linkedin_search", "")):
+                st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
+            if c.get("name") in emails:
+                st.markdown(f"**{T['email']}**")
+                st.code(emails[c["name"]], language=None, wrap_lines=True)
+        if not rows:
+            st.caption(T["pick_row"])
 
-footer()
+st.markdown(f'<p class="bf-note">{e(T["warn"])} '
+            f'{e(T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches, tokens=u.input_tokens + u.output_tokens))}</p>',
+            unsafe_allow_html=True)

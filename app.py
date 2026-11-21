@@ -226,12 +226,15 @@ def footer():
 
 # Optional password, so strangers can't use up the API credits
 password = _secret("APP_PASSWORD")
-if password:
+if password and not st.session_state.get("unlocked"):
     entered = st.text_input(T["pw_title"], type="password", placeholder="••••••••")
-    if entered != password:
-        st.caption(T["pw_body"])
-        footer()
-        st.stop()
+    if entered == password:
+        # Remember the visitor for this session and hide the password box
+        st.session_state["unlocked"] = True
+        st.rerun()
+    st.caption(T["pw_body"])
+    footer()
+    st.stop()
 
 from buyer_finder import Usage, draft_emails, friendly_error, research_buyers, verify_websites  # noqa: E402
 

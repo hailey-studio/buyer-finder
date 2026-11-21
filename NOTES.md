@@ -45,6 +45,7 @@ myself and turned what I found into the next fix.
 | 4 | 4 websites belonged to someone else (another company, a brand directory, a reseller) | The rule only needed one word of the name in the domain | The domain must be built from the company's own name |
 | 4 | 4 of 10 quotes failed the check | The AI joined parts of a page with "..." | Check each part on its own |
 | 5 | 9 of 10 scored 5/5, so the score told the user nothing | The scoring rules were too easy | Scoring rules version 2 |
+| 6 | All targets met. Scores now 4 or 5: every company really is a close match | The search is already narrow; the rules can't yet tell good from best | Next rule: how to treat companies that also manufacture |
 
 Round 5 also proved the evidence check works: the AI quoted "Herramientas y accesorios" (tools and
 accessories) while the page says "Herrajes y accesorios" (hardware and accessories). One changed word,
@@ -56,12 +57,12 @@ I did not want to judge the product by how it looked, so I defined one north-sta
 **fully verified buyers per search** (the quote was found in the source and the official website opens).
 This is the number of results a user can act on without checking them again.
 
-| Metric | Before the fixes | Round 5 | Target |
-|---|---|---|---|
-| Fully verified buyers (of 10) | about 1 | 4 | 5 or more |
-| Official website confirmed | 30% | 70% (one matched by name only) | 70% |
-| Quotes checked | 80% (against the search summary only) | 70% (3 against the page itself, 4 against the summary) | 80% |
-| Cost per search | $0.011 | not recorded | under $0.02 |
+| Metric | Before the fixes | Round 5 | Round 6 | Target |
+|---|---|---|---|---|
+| Fully verified buyers (of 10) | about 1 | 4 | **5** | 5 or more |
+| Official website confirmed | 30% | 70% | 70% (2 matched by name only) | 70% |
+| Quotes checked | 80% (search summary only) | 70% | **100%** (6 on the page itself, 4 in the summary) | 80% |
+| Cost per search | $0.011 | not recorded | not recorded | under $0.02 |
 
 After round 2 the metric showed that website confirmation (30%) was the bottleneck, so I fixed that first.
 

@@ -15,6 +15,7 @@ Every step also reports its usage, so the app can show what a run cost.
 import json
 import os
 import re
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -189,11 +190,19 @@ def _extract_json(text: str):
 
 
 def _score(company) -> float:
-    """fit_score as a number, even if the model wrote "4" or "4.5"."""
-    try:
-        return float(company.get("fit_score", 0) or 0)
-    except (TypeError, ValueError):
-        return 0.0
+    """fit_score as a number from 0 to 5, even if the model wrote "4", "4/5", "4 out of 5" or "high"."""
+    value = company.get("fit_score", 0)
+    if isinstance(value, (int, float)):
+        return float(max(0, min(5, value)))
+    text = str(value or "").strip().lower()
+    match = re.search(r"\d+(\.\d+)?", text)
+    if match:
+        return float(max(0, min(5, float(match.group()))))
+    words = {"very high": 5, "high": 4, "medium": 3, "moderate": 3, "low": 2}
+    for word, score in words.items():
+        if word in text:
+            return float(score)
+    return 0.0
 
 
 # Sites that are never a buyer: marketplaces, directories, social media, job boards.
@@ -364,21 +373,29 @@ def _research_with_search_api(seller, product, country, n, usage):
     return _clean(companies)
 
 
-def check_website(url: str, timeout: int = 6) -> bool:
-    """Return True if the company website exists. Catches made-up or dead links."""
+def check_website(url: str, timeout: int = 10) -> bool:
+    """Return True if the company website exists. Catches made-up or dead links.
+    Only asks "does this site answer?", so it also accepts sites with old security certificates."""
     if not url:
         return False
     if not url.startswith("http"):
         url = "https://" + url
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (BuyerFinder)"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status < 400
-    except urllib.error.HTTPError as e:
-        # Many real sites block automated visits (401/403/405/429): the site exists, so count it.
-        return e.code in (401, 403, 405, 429)
-    except Exception:
-        return False
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/120 Safari/537.36"}
+    lenient = ssl.create_default_context()
+    lenient.check_hostname = False
+    lenient.verify_mode = ssl.CERT_NONE
+    for context in (None, lenient):
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                return response.status < 500
+        except urllib.error.HTTPError as e:
+            # The server answered, so the site exists (many block automated visits with 403 etc.)
+            return e.code < 500 and e.code not in (404, 410)
+        except Exception:
+            continue
+    return False
 
 
 def verify_websites(companies: list) -> list:
@@ -389,8 +406,8 @@ def verify_websites(companies: list) -> list:
         results = list(pool.map(lambda c: check_website(c.get("website", "")), companies))
     for company, ok in zip(companies, results):
         company["website_ok"] = ok
-    # Working websites first, then by fit score
-    return sorted(companies, key=lambda c: (not c.get("website_ok"), -_score(c)))
+    # Best fit first; among equal scores, working websites first
+    return sorted(companies, key=lambda c: (-_score(c), not c.get("website_ok")))
 
 
 def _draft_one(seller, product, company, language, usage):

@@ -311,12 +311,100 @@ def _check_evidence(companies: list, results: list) -> None:
         c["evidence_verified"] = bool(pieces) and long_enough and all(p in page for p in pieces)
 
 
+COUNTRY_TLDS = {
+    "spain": "es", "españa": "es", "西班牙": "es", "mexico": "mx", "méxico": "mx", "墨西哥": "mx",
+    "germany": "de", "德国": "de", "france": "fr", "法国": "fr", "italy": "it", "意大利": "it",
+    "portugal": "pt", "葡萄牙": "pt", "netherlands": "nl", "荷兰": "nl", "poland": "pl", "波兰": "pl",
+    "united kingdom": "co.uk", "uk": "co.uk", "英国": "co.uk", "brazil": "com.br", "巴西": "com.br",
+    "chile": "cl", "智利": "cl", "colombia": "co", "哥伦比亚": "co", "india": "in", "印度": "in",
+    "saudi arabia": "sa", "沙特": "sa", "沙特阿拉伯": "sa", "turkey": "com.tr", "土耳其": "com.tr",
+    "australia": "com.au", "澳大利亚": "com.au", "japan": "jp", "日本": "jp", "vietnam": "vn", "越南": "vn",
+}
+
+
+def _page_mentions(url: str, name: str, timeout: int = 8) -> bool:
+    """Open a page and check that a distinctive word of the company name appears in it.
+    Used for guessed domains, so a parked page or another company is not accepted."""
+    words = [w.translate(ACCENTS) for w in _name_words(name)]
+    if not words:
+        return False
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/120 Safari/537.36"}
+    lenient = ssl.create_default_context()
+    lenient.check_hostname = False
+    lenient.verify_mode = ssl.CERT_NONE
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout, context=lenient) as r:
+            text = r.read(300_000).decode("utf-8", "ignore").lower().translate(ACCENTS)
+    except Exception:
+        return False
+    if any(p in text for p in ("domain is for sale", "dominio en venta", "buy this domain", "parked")):
+        return False
+    # Every distinctive word must appear (up to two), so "almir.es" of another Almir is not accepted
+    return all(w in text for w in dict.fromkeys(words[:2]))
+
+
+def _guess_domains(name: str, country: str) -> list:
+    """Likely domains built only from the company name, e.g. "Fajota Iberica S.L." -> fajota.es, fajotaiberica.es."""
+    distinctive = [w.translate(ACCENTS) for w in _name_words(name)]
+    if not distinctive:
+        return []
+    every = [w for w in re.findall(r"[a-z0-9]+", name.lower().translate(ACCENTS))
+             if w not in LEGAL_WORDS or w in ("herrajes", "distribuciones", "comercial", "industrial")]
+    labels = [distinctive[0], "".join(distinctive), "".join(every), "-".join(every)]
+    tld = COUNTRY_TLDS.get(country.strip().lower())
+    tlds = [tld, "com"] if tld and tld != "com" else ["com"]
+    seen, result = set(), []
+    for label in labels:
+        for t in tlds:
+            domain = f"{label}.{t}"
+            if 3 <= len(label) <= 40 and domain not in seen:
+                seen.add(domain)
+                result.append(f"https://{domain}")
+    return result[:6]
+
+
 def find_missing_websites(companies: list, country: str, usage: "Usage") -> list:
-    """For companies the model gave no website, run one quick search for the official site.
-    Only accepts a result whose domain matches the company name, so directories are never used."""
+    """For companies without a trustworthy website, try three ways, stopping at the first that works:
+    1. search "name country official website"   2. search "name city"
+    3. guess domains from the name and keep one only if the page mentions the company.
+    A search result is only accepted if its domain is built from the company's own name."""
     missing = [c for c in companies if not c.get("website")]
     if not missing:
         return companies
+
+    def from_search(query, name):
+        try:
+            results = web_search(query)
+        except ValueError:
+            return ""
+        usage.searches += 1
+        for r in results:
+            if _looks_like_official_site(r["link"], name):
+                parts = urllib.parse.urlparse(r["link"])
+                return f"{parts.scheme}://{parts.netloc}"
+        return ""
+
+    def lookup(company):
+        name = company.get("name", "")
+        queries = [f"{name} {country} official website"]
+        if company.get("city"):
+            queries.append(f"{name} {company['city']}")
+        for q in queries:
+            site = from_search(q, name)
+            if site:
+                company["website"] = site
+                return
+        for url in _guess_domains(name, country):
+            if _page_mentions(url, name):
+                company["website"] = url
+                company["website_guessed"] = True
+                return
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(lookup, missing))
+    return companies
 
     def lookup(company):
         try:

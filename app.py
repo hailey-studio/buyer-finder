@@ -166,6 +166,7 @@ TEXT = {
         "next": "Suggested next step",
         "find_people": "Find their purchasing manager on LinkedIn",
         "site_ok": "Website opens",
+        "site_guess": "Website matched by name, please confirm",
         "site_bad": "Website not confirmed",
         "email": "First email draft",
         "only_ok": "Only show companies with a working website",
@@ -238,6 +239,7 @@ TEXT = {
         "next": "建议下一步",
         "find_people": "在 LinkedIn 上找采购负责人",
         "site_ok": "官网能打开",
+        "site_guess": "官网按名称匹配，请确认",
         "site_bad": "官网未确认",
         "email": "开发信草稿",
         "only_ok": "只显示官网能打开的公司",
@@ -369,7 +371,8 @@ ok = sum(1 for c in companies if c.get("website_ok"))
 checked = sum(1 for c in companies if c.get("evidence_verified"))
 u = result["usage"]
 
-both = sum(1 for c in companies if c.get("evidence_verified") and c.get("website_ok"))
+both = sum(1 for c in companies
+           if c.get("evidence_verified") and c.get("website_ok") and not c.get("website_guessed"))
 cost = f"{u.currency}{u.cost:.3f}"
 summary = (T["summary"].format(n=len(companies), secs=result.get("seconds", "?"), both=both, cost=cost,
                                per=f"{u.currency}{u.cost / both:.4f}") if both else
@@ -428,7 +431,9 @@ with right:
             if site:
                 meta += f' &nbsp; <a href="{e(site)}" target="_blank">{e(site.split("//", 1)[-1].rstrip("/"))}</a>'
             site_ok = bool(site and c.get("website_ok"))
-            badges = (f'<span class="{"ok" if site_ok else "no"}">{e(T["site_ok"] if site_ok else T["site_bad"])}</span>'
+            guessed = site_ok and c.get("website_guessed")
+            site_label = T["site_guess"] if guessed else (T["site_ok"] if site_ok else T["site_bad"])
+            badges = (f'<span class="{"ok" if site_ok and not guessed else "no"}">{e(site_label)}</span>'
                       f'<span class="{"ok" if c.get("evidence_verified") else "no"}">'
                       f'{e(T["chip_ev"] if c.get("evidence_verified") else T["chip_no_ev"])}</span>')
             score = float(c.get("fit_score") or 0)

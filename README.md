@@ -74,9 +74,29 @@ DEEPSEEK_API_KEY = "your-deepseek-key"
 APP_PASSWORD = "choose-a-password"
 ```
 
+## Public free version
+
+The live demo is open to everyone, with two daily limits so the API bill stays small:
+
+- 3 searches per visitor per day
+- 100 searches per day for the whole app (at about US$0.01 a search, at most about US$1 a day)
+
+When a limit is reached the visitor sees a short note in Chinese and English with my WeChat (haileyyy_qz) for a report checked by hand. Viewing the sample result never counts.
+
+Settings, all optional, in the app's **Secrets**:
+
+```toml
+SEARCHES_PER_VISITOR_PER_DAY = 3
+SEARCHES_PER_DAY_TOTAL = 100
+FEEDBACK_WEBHOOK_URL = "https://..."   # also send every search and every rating here as JSON
+LIMIT_SALT = "any-random-text"         # mixed into the visitor fingerprint
+```
+
+Remove `APP_PASSWORD` to open the app to everyone. Each search and each thumbs up or down is written to the app logs as one line starting with `BF_EVENT` (country and product length only, never the product text). To count them, download the logs and run `python public_usage.py stats logs.txt`. How the limits work and what they can't stop is in [NOTES.md](NOTES.md).
+
 ## Tests
 
-35 automated tests, one or more for every issue found in review (logic bugs, trust issues and usability problems). They replace every network call, so they run without an API key:
+57 automated tests, one or more for every issue found in review (logic bugs, trust issues and usability problems). They replace every network call, so they run without an API key:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -95,6 +115,7 @@ Buyer Finder aims to be the simplest of these to use: one web page, in Chinese o
 
 - Web search misses companies with little online presence, and it can't verify emails or phone numbers.
 - Searches and statuses are kept only while the browser tab is open.
+- The daily limits live in memory, so they reset when the app restarts, and a determined visitor can get around the per-visitor limit.
 - Built for a first list of leads, not for sending emails at scale.
 
 ## Next

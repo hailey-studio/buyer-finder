@@ -8,6 +8,7 @@ import pytest
 HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(HERE, ".."))
 import buyer_finder as real  # noqa: E402
+import public_usage as pu  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 state = {"mode": "ok", "email_fail": False, "calls": []}
@@ -18,6 +19,8 @@ def research_buyers(seller, product, country, n=10, usage=None, progress=None, l
     progress("search", i=1, total=3, query="q")
     if state["mode"] == "fail":
         raise Exception("Your credit balance is too low")
+    if state["mode"] == "leak":
+        raise Exception("401 Unauthorized for url https://api.example/search?api_key=abcd1234efgh5678 key sk-live987654321")
     if state["mode"] == "empty":
         return []
     usage.add_search(3)
@@ -55,6 +58,9 @@ fake.research_buyers, fake.verify_websites, fake.draft_emails = research_buyers,
 def setup(monkeypatch):
     monkeypatch.setitem(sys.modules, "buyer_finder", fake)
     monkeypatch.delenv("APP_PASSWORD", raising=False)
+    for name in ("SEARCHES_PER_VISITOR_PER_DAY", "SEARCHES_PER_DAY_TOTAL", "FEEDBACK_WEBHOOK_URL"):
+        monkeypatch.delenv(name, raising=False)
+    pu.COUNTERS.reset()
     state.update(mode="ok", email_fail=False, calls=[])
 
 
@@ -209,3 +215,72 @@ def test_status_follows_company():
     assert at.dataframe[0].value["Status"].tolist()[0] == "Contacted"
     at.toggle[0].set_value(True).run()
     assert at.dataframe[0].value["Status"].tolist()[0] == "Contacted"
+
+
+# ---------- Public free version ----------
+
+def events(capsys):
+    return pu.parse_events(capsys.readouterr().out.splitlines())
+
+
+def test_P1_visitor_limit_stops_the_search_before_any_api_call(monkeypatch, capsys):
+    monkeypatch.setenv("SEARCHES_PER_VISITOR_PER_DAY", "1")
+    at = run(new())
+    button(at, "New search", sidebar=True).click().run()
+    run(at)
+    assert len(state["calls"]) == 1, "the second search must not reach the backend"
+    assert at.info and "haileyyy_qz" in at.info[0].value and "免费搜索" in at.info[0].value
+    kinds = [ev["event"] for ev in events(capsys)]
+    assert kinds.count("search") == 1 and kinds.count("limit_hit") == 1
+
+
+def test_P2_total_limit_is_shared_by_all_visitors(monkeypatch):
+    monkeypatch.setenv("SEARCHES_PER_DAY_TOTAL", "1")
+    run(new())
+    at = run(new())                                      # a different visitor (new session)
+    assert len(state["calls"]) == 1
+    assert "try again tomorrow" in at.info[0].value
+
+
+def test_P3_searches_left_shown():
+    at = run(new())
+    button(at, "New search", sidebar=True).click().run()
+    assert any("Free searches left today: 2" in c.value for c in at.caption)
+
+
+def test_P4_search_log_has_no_product_text(capsys):
+    run(new())
+    ev = [x for x in events(capsys) if x["event"] == "search"]
+    assert len(ev) == 1 and ev[0]["country"] == "Spain"
+    assert set(ev[0]) == {"event", "ts", "country", "product_len"}
+
+
+def test_P5_feedback_logged_with_comment(capsys):
+    at = run(new())
+    capsys.readouterr()
+    at.session_state["fb0"] = 1                          # thumbs up
+    at.run()
+    at.text_input(key="fbtext0").input("Good list,\nbut two are shops").run()
+    button(at, "Send").click().run()
+    assert not at.exception
+    fb = [x for x in events(capsys) if x["event"] == "feedback"]
+    assert [x["rating"] for x in fb] == ["up", "up"] and fb[1]["comment"] == "Good list, but two are shops"
+    assert pu.summarize(fb)["feedback"] == {"up": 1, "down": 0}
+    assert any("Thanks" in c.value for c in at.caption)
+
+
+def test_P6_contact_line_on_results_and_sample():
+    at = run(new())
+    assert "WeChat: haileyyy_qz" in detail_text(at)
+    at = new()
+    at.radio[0].set_value("中文").run()
+    button(at, "查看示例结果（不需要密码）").click().run()
+    assert "加微信 haileyyy_qz" in detail_text(at)
+
+
+def test_P7_errors_never_show_keys(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-live987654321")
+    state["mode"] = "leak"
+    at = run(new())
+    shown = at.error[0].value
+    assert "abcd1234efgh5678" not in shown and "sk-live987654321" not in shown and "[hidden]" in shown

@@ -111,11 +111,55 @@ the search summary had been checked) and 8 usability issues.
 I asked for every one to be fixed properly, with a test so it cannot come back. The tests are in `tests/`.
 Run against the old version, 25 of 27 failed; every test passes now.
 
+## Public free version
+
+The demo started behind a password to protect my API balance. To let anyone use it, I replaced the password
+with daily limits: 3 searches per visitor and 100 for the whole app. 100 searches cost about US$1 a day on DeepSeek.
+Both numbers can be changed in Secrets (`SEARCHES_PER_VISITOR_PER_DAY`, `SEARCHES_PER_DAY_TOTAL`) without touching code.
+
+**Constraint.** Streamlit Community Cloud has no database and wipes its disk on restart. So everything is kept in memory
+or written to the logs.
+
+**How the limits work** (`public_usage.py`)
+- Each browser session counts its own searches.
+- A rough fingerprint also counts them: a hash of the visitor's forwarded IP, browser and language, mixed with the date,
+  so the raw IP is never stored and the fingerprint changes every day. This stops the easy trick of opening a new tab.
+- The fingerprint only uses the forwarded IP header. The raw connection IP can be the same for every visitor behind
+  Streamlit's proxy, which would make everyone share 3 searches. With no forwarded IP the app falls back to the
+  session only.
+- The whole-app count is one in-memory counter per UTC day. A new day starts at 08:00 Hong Kong time.
+- A search is counted when it starts, before any API call, so a cancelled or failed search still counts.
+  Viewing the sample never counts.
+
+**What it can't do, honestly**
+- A determined visitor can get around the per-visitor limit: another browser, private mode plus a VPN, or a different network.
+  The whole-app cap of 100 still holds, so the most anyone can cost me in a day is the same US$1.
+- Both counters reset when the app restarts, redeploys or wakes from sleep. In the worst case one day could see
+  100 searches before a restart and 100 after.
+- If the app runs on more than one server process, each has its own counter. Community Cloud runs one.
+
+**Feedback and stats without a database**
+- Under each result there is a thumbs up or down and an optional one-line comment.
+- Every search, every rating and every time a limit stops someone is printed as one JSON line starting with `BF_EVENT`.
+  A search line holds only the time, the country and the length of the product text. No company details, no IP.
+- If `FEEDBACK_WEBHOOK_URL` is set in Secrets, the same JSON is also posted there (for example a Google Apps Script
+  that adds a row to a Google Sheet). If the webhook is slow or down the app ignores it.
+- To read the numbers: open the app's logs from Manage app on Streamlit Cloud, save them as a text file and run
+  `python public_usage.py stats logs.txt`. It prints searches per day, top countries, limit hits, thumbs up and down
+  (the latest rating per result) and all comments. Cloud logs are not kept forever, so for numbers over weeks set the webhook.
+
+**Errors.** Error messages are cleaned before they are shown: any API key, password or webhook address, and anything
+that looks like a key (`sk-...`, `api_key=...`, `Bearer ...`), is replaced with `[hidden]`.
+
+**What I want to learn from it.** How many people use it each day, which countries they search, how often the limit stops
+someone (demand for a report checked by hand), and whether the thumbs up rate goes up when I change the search.
+
 ## Next
 
 1. Put it in front of real exporters I know and record what they do with the results.
 2. Add trade fair exhibitor lists as a source (for example Canton Fair, India ITME).
 3. Save searches and statuses between visits.
+4. After a few weeks of public use, read the logs and decide whether the limits are right.
 
 ## What I learned
 

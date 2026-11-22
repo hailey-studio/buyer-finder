@@ -4,11 +4,14 @@ import html
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
+
+import public_usage as pu
 
 st.set_page_config(page_title="Buyer Finder: AI buyer research for exporters", page_icon="🌍", layout="wide",
                    initial_sidebar_state="expanded")
@@ -79,6 +82,8 @@ h1, h2, h3 { font-family: 'IBM Plex Sans Condensed', 'PingFang SC', sans-serif; 
 .bf-detail-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 [class*="st-key-bfdetail"] { background: #fff; }
 .bf-footer a { color: var(--stamp); }
+.bf-contact { color: var(--steel); font-size: 13.5px; margin: 6px 0 0; }
+.bf-rate { color: var(--steel); font-size: 13.5px; margin: 18px 0 2px; }
 @media (max-width: 700px) { .bf-route .what { font-size: 28px; } .bf-row { grid-template-columns: 26px 1fr; }
   .bf-fit { grid-column: 2; text-align: left; } .bf-fit .bar { justify-content: flex-start; }
   [class*="st-key-bfrow"] [data-testid="stExpander"] details { margin-left: 0; width: 100%; } }
@@ -102,6 +107,17 @@ def _secret(name):
 for name in ("BUYER_FINDER_PROVIDER", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "SERPAPI_API_KEY"):
     if _secret(name):
         os.environ[name] = _secret(name)
+
+# Public free version: daily limits (change them in Secrets) and an optional webhook for stats
+LIMITS = pu.read_limits(_secret)
+WEBHOOK = _secret("FEEDBACK_WEBHOOK_URL")
+SECRET_VALUES = [_secret(n) for n in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "SERPAPI_API_KEY",
+                                      "APP_PASSWORD", "FEEDBACK_WEBHOOK_URL")]
+
+
+def clean_error(text) -> str:
+    """Error text for the screen, with API keys and other secrets replaced by [hidden]."""
+    return pu.redact(text, SECRET_VALUES)
 
 TEXT = {
     "English": {
@@ -204,6 +220,13 @@ TEXT = {
         "email": "First email draft",
         "only_ok": "Only show companies with a working website",
         "cost": "Estimated cost of this run: {cur}{cost:.3f} ({searches} web searches, {tokens:,} tokens)",
+        "left_today": "Free searches left today: {n}",
+        "contact": "For a full report checked by hand, add me on WeChat: haileyyy_qz",
+        "rate": "Rate these results",
+        "fb_comment": "Comment (optional)",
+        "fb_placeholder": "One line is enough",
+        "fb_send": "Send",
+        "fb_thanks": "Thanks, got it.",
     },
     "中文": {
         "about_help": "写清楚：做什么产品、材质、认证、起订量、能否 OEM/ODM、已经出口到哪些市场。越具体，匹配越准。",
@@ -305,6 +328,13 @@ TEXT = {
         "email": "开发信草稿",
         "only_ok": "只显示官网能打开的公司",
         "cost": "本次运行估算花费：{cur}{cost:.3f}（网页搜索 {searches} 次，共 {tokens:,} 个 tokens）",
+        "left_today": "今天还可以免费搜索 {n} 次。",
+        "contact": "想要人工核对过的完整报告？加微信 haileyyy_qz",
+        "rate": "这次结果有用吗",
+        "fb_comment": "补充一句（可不填）",
+        "fb_placeholder": "一句话就好",
+        "fb_send": "发送",
+        "fb_thanks": "收到，谢谢。",
     },
 }
 
@@ -322,6 +352,11 @@ ss.setdefault("selected", {})     # search id -> uid of the company shown in the
 ss.setdefault("form", None)       # values to pre-fill the search form with (for "Edit this search")
 ss.setdefault("run_now", False)   # a search is waiting to run
 ss.setdefault("run_error", "")
+ss.setdefault("limit_msg", "")    # shown when a daily limit stops a search
+ss.setdefault("searches_today", None)  # {"day": "2026-11-22", "count": 2} for this browser session
+ss.setdefault("sid", uuid.uuid4().hex[:8])  # random id so feedback on the same result can be matched up
+ss.setdefault("fb_sent", {})      # search id -> rating already logged
+ss.setdefault("fb_done", {})      # search id -> True once a comment was sent
 
 SAMPLE_PATH = Path(__file__).parent / "sample_result.json"
 
@@ -391,11 +426,46 @@ with st.sidebar:
     st.markdown(footer_html(), unsafe_allow_html=True)
 
 
+def visitor_fp(day):
+    try:
+        headers = dict(st.context.headers)
+    except Exception:
+        headers = {}
+    return pu.fingerprint(headers, day, _secret("LIMIT_SALT") or "")
+
+
+def blocked_by_limit():
+    """Which daily limit would stop the next search ('visitor' or 'total'), or None. Counts nothing."""
+    day = pu.utc_day()
+    total, by_fp = pu.COUNTERS.counts(day, visitor_fp(day))
+    return pu.check_limits(LIMITS, pu.session_count(ss["searches_today"], day), by_fp, total)
+
+
+def searches_left() -> int:
+    day = pu.utc_day()
+    total, by_fp = pu.COUNTERS.counts(day, visitor_fp(day))
+    used = max(pu.session_count(ss["searches_today"], day), by_fp)
+    return max(0, min(LIMITS["per_visitor"] - used, LIMITS["total"] - total))
+
+
+def stop_for_limit(kind):
+    pu.emit(pu.limit_record(kind), WEBHOOK)
+    ss["limit_msg"], ss["run_now"] = pu.limit_message(kind, LIMITS), False
+
+
 def run_search(inputs: dict):
     """Run one search. Shows live progress; a click on Cancel stops it (Streamlit stops the running script)."""
     if st.button(T["cancel"], key="cancel"):
         ss["run_now"] = False
         st.rerun()
+    # Count the search before any API call, so a cancelled or failed search still counts
+    day = pu.utc_day()
+    kind = pu.COUNTERS.try_consume(day, LIMITS, pu.session_count(ss["searches_today"], day), visitor_fp(day))
+    if kind:
+        stop_for_limit(kind)
+        st.rerun()
+    ss["searches_today"] = {"day": day, "count": pu.session_count(ss["searches_today"], day) + 1}
+    pu.emit(pu.search_record(inputs["country"], inputs["product"]), WEBHOOK)
     usage = Usage()
     started = time.time()
     status = st.status(T["working"], expanded=True)
@@ -414,7 +484,7 @@ def run_search(inputs: dict):
             companies = verify_websites(companies)
     except Exception as ex:
         status.update(label=T["error"], state="error")
-        ss["run_now"], ss["run_error"] = False, friendly_error(ex)
+        ss["run_now"], ss["run_error"] = False, clean_error(friendly_error(ex))
         st.rerun()
     if not companies:
         status.update(state="error")
@@ -445,7 +515,7 @@ def write_emails(result):
                                         language=email_language, usage=result["usage"])
         result["email_error"] = ""
     except Exception as ex:
-        result["email_error"] = friendly_error(ex)
+        result["email_error"] = clean_error(friendly_error(ex))
 
 
 # ---------- Search form ----------
@@ -470,8 +540,19 @@ if ss["current"] is None and not ss.get("sample_mode"):
             st.stop()
         ss["form"] = {"seller": seller, "product": product.strip(), "country": country.strip(), "n": n,
                       "top": top, "email_idx": T["email_options"].index(email_choice)}
-        ss["run_now"], ss["run_error"] = True, ""
+        ss["run_error"], ss["limit_msg"] = "", ""
+        kind = blocked_by_limit()
+        if kind:
+            stop_for_limit(kind)
+        else:
+            ss["run_now"] = True
         st.rerun()
+    if ss["limit_msg"]:
+        st.info(ss["limit_msg"])
+    elif not ss["run_now"]:
+        left = searches_left()
+        if 0 < left < LIMITS["per_visitor"]:
+            st.caption(T["left_today"].format(n=left))
     if ss["run_error"]:
         st.error(ss["run_error"])
         if ss["form"] and st.button(T["retry"], key="retry"):
@@ -677,3 +758,31 @@ with right:
 cost_line = (T["cost"].format(cur=u.currency, cost=u.cost, searches=u.searches,
                              tokens=u.input_tokens + u.output_tokens) if cost_known else "")
 st.markdown(f'<p class="bf-note">{e(T["warn"])} {e(cost_line)}</p>', unsafe_allow_html=True)
+
+
+# ---------- Feedback on this result set (logged, no database) ----------
+def feedback_fields():
+    return {"feedback_id": f'{ss["sid"]}-{rid}', "country": result.get("country", ""), "n_results": len(companies)}
+
+
+def send_comment():
+    text = ss.get(f"fbtext{rid}", "")
+    if text.strip():
+        pu.emit(pu.feedback_record(rating=ss.get(f"fb{rid}"), comment=text, **feedback_fields()), WEBHOOK)
+        ss["fb_done"][rid], ss[f"fbtext{rid}"] = True, ""
+
+
+if not is_sample:
+    st.markdown(f'<p class="bf-rate">{e(T["rate"])}</p>', unsafe_allow_html=True)
+    rating = st.feedback("thumbs", key=f"fb{rid}")
+    if rating is not None and ss["fb_sent"].get(rid) != rating:
+        pu.emit(pu.feedback_record(rating=rating, comment="", **feedback_fields()), WEBHOOK)
+        ss["fb_sent"][rid] = rating
+    if rating is not None:
+        if ss["fb_done"].get(rid):
+            st.caption(T["fb_thanks"])
+        else:
+            box, send = st.columns([4, 1], vertical_alignment="bottom")
+            box.text_input(T["fb_comment"], key=f"fbtext{rid}", max_chars=200, placeholder=T["fb_placeholder"])
+            send.button(T["fb_send"], key=f"fbsend{rid}", on_click=send_comment)
+st.markdown(f'<p class="bf-contact">{e(T["contact"])}</p>', unsafe_allow_html=True)

@@ -127,7 +127,11 @@ TEXT = {
                    "imports_or_same_material": "Already imports, or sells the same material (+1)"},
         "score_old": "Scored by an earlier version, before the scoring rules were added.",
         "hist_count": "{n} buyers",
-        "summary_sample": "{n} buyers found. {both} are fully verified (evidence checked and website confirmed).",
+        "summary_sample": "{n} buyers found. {both} are fully verified (evidence checked, website confirmed, no sign they make the product themselves).",
+        "maker_warn": "Page suggests they manufacture this themselves, may be a competitor. Check before you reach out.",
+        "maker_chip": "Possible manufacturer",
+        "maker_said": "The page says:",
+        "site_rejected": "Guessed website {url} was not used: {reason}.",
         "content_lang": "English",
         "new_search": "New search",
         "recent": "Recent searches",
@@ -143,7 +147,7 @@ TEXT = {
         "tagline": "Tell it what your factory makes and where you want to sell. It finds importers and distributors there, shows the evidence for each one, and drafts a first email.",
         "flow": "<b>1</b> Search the web for buyers &nbsp; <b>2</b> Drop competitors, marketplaces and directories &nbsp; <b>3</b> Check each quote against its source and confirm the website &nbsp; <b>4</b> Draft emails for the best matches",
         "route_to": "to",
-        "summary": "{n} buyers found in {secs} seconds. {both} are fully verified (evidence checked and website confirmed). Cost {cost}, or {per} per verified buyer.",
+        "summary": "{n} buyers found in {secs} seconds. {both} are fully verified (evidence checked, website confirmed, no sign they make the product themselves). Cost {cost}, or {per} per verified buyer.",
         "summary_none": "{n} buyers found in {secs} seconds. None is fully verified yet: open the source of each one before reaching out. Cost {cost}.",
         "tab_overview": "Overview", "tab_evidence": "Evidence", "tab_email": "Email draft",
         "no_email": "No draft for this company. Emails are written for the top matches with a working website.",
@@ -224,7 +228,11 @@ TEXT = {
                    "imports_or_same_material": "已经在进口，或卖同样材质的产品（+1）"},
         "score_old": "这是旧版本打的分，当时还没有评分规则。",
         "hist_count": "{n} 家",
-        "summary_sample": "找到 {n} 家买家，其中 {both} 家完全核实（证据已核对且官网已确认）。",
+        "summary_sample": "找到 {n} 家买家，其中 {both} 家完全核实（证据已核对、官网已确认、没有迹象表明他们自己生产这类产品）。",
+        "maker_warn": "网页显示他们自己生产这类产品，可能是同行。联系之前请先核实。",
+        "maker_chip": "可能是生产商",
+        "maker_said": "网页原文：",
+        "site_rejected": "按名称猜到的网站 {url} 没有采用：{reason}。",
         "content_lang": "Simplified Chinese",
         "new_search": "新搜索",
         "recent": "最近的搜索",
@@ -240,7 +248,7 @@ TEXT = {
         "tagline": "填写你的工厂做什么、想卖到哪个国家。它会找出当地的进口商和分销商，给出每一家的证据，并起草第一封开发信。",
         "flow": "<b>1</b> 上网搜索买家 &nbsp; <b>2</b> 去掉同行、平台和名录网站 &nbsp; <b>3</b> 逐字核对证据，确认官网 &nbsp; <b>4</b> 为最匹配的几家写开发信",
         "route_to": "销往",
-        "summary": "用时 {secs} 秒，找到 {n} 家买家，其中 {both} 家完全核实（证据已核对且官网已确认）。花费 {cost}，平均每家核实买家 {per}。",
+        "summary": "用时 {secs} 秒，找到 {n} 家买家，其中 {both} 家完全核实（证据已核对、官网已确认、没有迹象表明他们自己生产这类产品）。花费 {cost}，平均每家核实买家 {per}。",
         "summary_none": "用时 {secs} 秒，找到 {n} 家买家，目前还没有完全核实的。联系之前请先打开每家的来源核对。花费 {cost}。",
         "tab_overview": "概览", "tab_evidence": "证据", "tab_email": "开发信",
         "no_email": "这家没有开发信草稿。开发信只为官网能打开、匹配度最高的几家撰写。",
@@ -429,7 +437,8 @@ def write_emails(result):
     inputs = result["inputs"]
     email_language = ("English" if inputs["email_idx"] == 0
                       else f"the main business language of {inputs['country']}")
-    good = [c for c in result["companies"] if c.get("website_ok") and not c.get("website_guessed")] \
+    good = [c for c in result["companies"]
+            if c.get("website_ok") and not c.get("website_guessed") and not c.get("maker_flag")] \
         or result["companies"]
     try:
         result["drafts"] = draft_emails(inputs["seller"], inputs["product"], good, top=inputs["top"],
@@ -512,7 +521,8 @@ companies = result["companies"]
 emails = {d["company"]: d["email"] for d in result["drafts"]}
 u = result["usage"]
 both = sum(1 for c in companies
-           if c.get("evidence_verified") and c.get("website_ok") and not c.get("website_guessed"))
+           if c.get("evidence_verified") and c.get("website_ok") and not c.get("website_guessed")
+           and not c.get("maker_flag"))
 cost_known = getattr(u, "cost", None) is not None
 cost = f"{u.currency}{u.cost:.3f}" if cost_known else ""
 secs = result.get("seconds")
@@ -552,6 +562,8 @@ export = pd.DataFrame([{
     "evidence_level": c.get("evidence_level", "none"), "next_step": c.get("next_step", ""),
     "email": emails.get(c.get("name"), ""), "linkedin_search": c.get("linkedin_search", ""),
     "source": c.get("source", ""),
+    "maker_flag": (c.get("maker_flag") or {}).get("sentence", ""),
+    "websites_rejected": "; ".join(f'{r["url"]} ({r["reason"]})' for r in c.get("websites_rejected", [])),
 } for c in companies])
 tool_right.download_button(T["export"], export.to_csv(index=False).encode("utf-8-sig"),
                            f"buyers_{result['country']}.csv", width="stretch")
@@ -565,7 +577,7 @@ if current_uid not in uids:
 
 table = pd.DataFrame([{
     " ": "●" if c["uid"] == current_uid else "",
-    T["col_company"]: c.get("name", ""),
+    T["col_company"]: ("⚠ " if c.get("maker_flag") else "") + c.get("name", ""),
     T["col_fit"]: float(c.get("fit_score") or 0),
     T["col_status"]: T["statuses"][status_of(c)],
     T["col_website"]: safe_link(c.get("website", "")),
@@ -609,6 +621,8 @@ with right:
             badges = (f'<span class="{"ok" if site_ok and not guessed else "no"}">{e(site_label)}</span>'
                       f'<span class="{"ok" if c.get("evidence_verified") else "no"}">'
                       f'{e(T["chip_ev"] if c.get("evidence_verified") else T["chip_no_ev"])}</span>')
+            if c.get("maker_flag"):
+                badges += f'<span class="no">{e(T["maker_chip"])}</span>'
             score = float(c.get("fit_score") or 0)
             position = T["viewing"].format(i=uids.index(c["uid"]) + 1, n=len(shown))
             st.markdown(
@@ -617,6 +631,12 @@ with right:
                 <div class="bf-meta">{meta}</div><div class="bf-status">{badges}</div></div>
                 <div class="bf-fit"><div class="num">{score:.0f}<small>/5</small></div></div></div>""",
                 unsafe_allow_html=True)
+            maker = c.get("maker_flag")
+            if maker:
+                st.warning(T["maker_warn"])
+                st.caption(f'{T["maker_said"]} "{maker.get("sentence", "")}"')
+                if safe_link(maker.get("url", "")):
+                    st.markdown(f'[{maker["url"]}]({maker["url"]})')
             key = f'{rid}|{c["uid"]}'
             new_status = st.selectbox(T["status_label"], T["statuses"], index=status_of(c), key=f"st_{key}")
             if T["statuses"].index(new_status) != status_of(c):
@@ -628,6 +648,8 @@ with right:
                 if c.get("what_they_sell"):
                     st.markdown(f"**{T['sells']}**  \n{c['what_they_sell']}")
                 st.markdown(f"**{T['next']}**  \n{c.get('next_step', '')}")
+                for r in c.get("websites_rejected", []):
+                    st.caption(T["site_rejected"].format(url=r.get("url", ""), reason=r.get("reason", "")))
                 if safe_link(c.get("linkedin_search", "")):
                     st.markdown(f"[{T['find_people']}]({c['linkedin_search']})")
                 st.markdown(f"**{T['score_title'].format(score=f'{score:.0f}')}**")

@@ -46,6 +46,27 @@ myself and turned what I found into the next fix.
 | 4 | 4 of 10 quotes failed the check | The AI joined parts of a page with "..." | Check each part on its own |
 | 5 | 9 of 10 scored 5/5, so the score told the user nothing | The scoring rules were too easy | Scoring rules version 2 |
 | 6 | All targets met. Scores now 4 or 5: every company really is a close match | The search is already narrow; the rules can't yet tell good from best | Next rule: how to treat companies that also manufacture |
+| 7 | Evaluation found 2 false buyers in the round 6 sample. One scored 5/5 as a distributor, but its own homepage says it designs and makes handles. Another was linked to a guessed website that belongs to a Portuguese manufacturer | The manufacturer filter only read the AI's "type" field. Guessed websites were only checked for the company name, not the country | Check page text for "we make this" in six languages and flag the company. Drop a guessed website when the domain, language or address points to another country |
+
+**Round 7: evaluation found 2 false buyers.** While building a separate test set, the round 6 sample was
+checked by hand against each company's own page.
+- Herrajes Ferramol: typed "distributor", scored 5/5. Its homepage says "FERRAMOL, desde 1979, diseña y fabrica
+  tiradores y pomos" (designs and makes handles and knobs). It is a manufacturer.
+- Fajota Iberica SL (Spain): linked to fajota.com, a guess built from the name. That site is a Portuguese
+  manufacturer in Águeda: Portuguese text, +351 phone numbers, postal code 3754-909.
+- Applying the new checks to the same 10 results: Ferramol flagged, Fajota's guessed website dropped, and INTHER
+  also flagged (its homepage says "We use top quality materials to manufacture our fittings"). Verdú is not
+  flagged: its page says "Somos fabricantes", but the next sentence says they have hardware made for them under
+  their own brand.
+
+Decision: flag, don't delete. A page that says "we manufacture" can be out of date, or the company can make one
+line and import another. So a flagged company stays in the list with a warning and the sentence that triggered
+it ("Page suggests they manufacture this themselves, may be a competitor"). It loses the "importer, distributor
+or wholesaler" point and is not counted as fully verified. Emails are drafted for unflagged companies first.
+Phrases like "mandamos a fabricar" or "made for us" mean the company buys from factories, so they cancel the flag.
+On a directory or reseller page, only sentences that name the company count.
+Guessed websites are different: they were only ever a guess, so one that points to another country is dropped,
+and the app shows which site was rejected and why.
 
 Round 5 also proved the evidence check works: the AI quoted "Herramientas y accesorios" (tools and
 accessories) while the page says "Herrajes y accesorios" (hardware and accessories). One changed word,
@@ -57,12 +78,13 @@ I did not want to judge the product by how it looked, so I defined one north-sta
 **fully verified buyers per search** (the quote was found in the source and the official website opens).
 This is the number of results a user can act on without checking them again.
 
-| Metric | Before the fixes | Round 5 | Round 6 | Target |
-|---|---|---|---|---|
-| Fully verified buyers (of 10) | about 1 | 4 | **5** | 5 or more |
-| Official website confirmed | 30% | 70% | 70% (2 matched by name only) | 70% |
-| Quotes checked | 80% (search summary only) | 70% | **100%** (6 on the page itself, 4 in the summary) | 80% |
-| Cost per search | $0.011 | not recorded | not recorded | under $0.02 |
+| Metric | Before the fixes | Round 5 | Round 6 | Round 7 (same results, new checks) | Target |
+|---|---|---|---|---|---|
+| Fully verified buyers (of 10) | about 1 | 4 | **5** | 4 (one flagged as a possible manufacturer) | 5 or more |
+| Official website confirmed | 30% | 70% | 70% (2 matched by name only) | 60% (1 matched by name only) | 70% |
+| Possible manufacturers flagged | not checked | not checked | not checked | 2 | |
+| Quotes checked | 80% (search summary only) | 70% | **100%** (6 on the page itself, 4 in the summary) | 100% (unchanged) | 80% |
+| Cost per search | $0.011 | not recorded | not recorded | not recorded | under $0.02 |
 
 After round 2 the metric showed that website confirmation (30%) was the bottleneck, so I fixed that first.
 

@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 
 import anthropic
@@ -338,7 +339,8 @@ BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 
 
 def _fetch_text(url: str, timeout: int = 8) -> str:
-    """Download a page and return its visible text (lower case, accents removed). "" if it can't be opened."""
+    """Download a page and return its visible text as written (one line per block). "" if it can't be opened.
+    Callers that compare words use _fold() on it; the original is kept so a sentence can be shown to the user."""
     if not (url or "").startswith(("http://", "https://")):
         return ""
     lenient = ssl.create_default_context()
@@ -351,12 +353,19 @@ def _fetch_text(url: str, timeout: int = 8) -> str:
     except Exception:
         return ""
     raw = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+    # Block tags become line breaks, so headings and paragraphs stay separate sentences
+    raw = re.sub(r"(?i)<(br|/p|/div|/h[1-6]|/li|/td|/tr|/title|/section|/header|/footer)\b[^>]*>", "\n", raw)
     text = html.unescape(re.sub(r"(?s)<[^>]+>", " ", raw))
-    return text.lower().translate(ACCENTS)
+    return re.sub(r"[ \t\r\f\v]+", " ", text)
+
+
+def _fold(text: str) -> str:
+    """Lower case, accents removed: the form used to compare quotes and names with a page."""
+    return (text or "").lower().translate(ACCENTS)
 
 
 def _quote_pieces(evidence: str) -> list:
-    # The model often joins pieces of the page with "..." — every piece must be found
+    # The model often joins pieces of the page with "...": every piece must be found
     pieces = [_normalize(p.translate(ACCENTS)) for p in re.split(r"\.\.\.|…", evidence or "")]
     return [p for p in pieces if p]
 
@@ -373,7 +382,11 @@ def _check_evidence(companies: list, results: list) -> None:
         pieces = _quote_pieces(c.get("evidence", ""))
         level = "none"
         if pieces and sum(len(p) for p in pieces) >= 12:
-            page = _normalize(_fetch_text(c.get("source", "")))
+            raw_page = _fetch_text(c.get("source", ""))
+            page = _normalize(_fold(raw_page))
+            # The page is already open: look for signs that the company makes this itself
+            own_site = _looks_like_official_site(c.get("source", ""), c.get("name", ""))
+            flag_maker(c, raw_page, c.get("source", ""), about_company_only=not own_site)
             if page and all(p in page for p in pieces):
                 level = "page"
             elif all(p in by_link.get(c.get("source"), "") for p in pieces):
@@ -397,11 +410,161 @@ COUNTRY_TLDS = {
 }
 
 
-def _page_mentions(url: str, name: str) -> bool:
-    """Open a page and check that the distinctive words of the company name appear in it.
+# ---------- Does the page say they make this themselves? (round 7) ----------
+# The model's "type" field said "distributor" for a company whose own homepage says
+# "FERRAMOL, desde 1979, diseña y fabrica tiradores y pomos". So the page text is checked too.
+# Patterns run on text that is lower case with all accents removed.
+MAKER_CUES = [re.compile(p) for p in (
+    # Spanish / Portuguese
+    r"\bfabricamos\b", r"\bproduzimos\b",
+    r"\b(disena|disenamos|desarrolla|desarrollamos|produce|producimos|crea|creamos|concebe)\s+y\s+fabrica(mos)?\b",
+    r"\bsomos\s+(una\s+empresa\s+|uma\s+empresa\s+|los\s+|unos\s+)?(fabricantes?|productores?)\b",
+    r"\b(nuestra|nuestras|nossa|nossas|propia|propias|propria)\s+(fabrica|fabricas|planta\s+de\s+produccion)\b",
+    r"\b(empresa|compania)\s+(es\s+)?fabricante\b", r"\be\s+uma?\s+(empresa\s+)?fabricante\b",
+    r"\b(la\s+empresa|la\s+compania|a\s+empresa)\s+fabrica\b",
+    r"\b(dedica-se|dedicamo-nos|se\s+dedica)\b[^.]{0,60}\b(ao\s+fabrico|a\s+la\s+fabricacion|a\s+fabricar)\b",
+    # German
+    r"\bwir\s+(fertigen|produzieren|entwickeln\s+und\s+(fertigen|produzieren))\b", r"\bwir\s+stellen\b[^.]{0,60}\bher\b",
+    r"\b(eigene|eigener|eigenen)\s+(herstellung|fertigung|produktion)\b",
+    r"\b(ist|sind)\s+(ein|eine|einer\s+der)?\s*(\w+\s+){0,2}hersteller\b", r"\bunsere?\s+(fabrik|fertigung|produktionsstatte)\b",
+    # French
+    r"\bnous\s+(fabriquons|produisons|concevons\s+et\s+fabriquons)\b", r"\bnotre\s+usine\b",
+    r"\b(sommes|est)\s+(un\s+)?(\w+\s+){0,2}fabricant\b",
+    # Italian
+    r"\b(fabbrichiamo|produciamo)\b", r"\b(il\s+)?nostro\s+stabilimento\b", r"\bnostra\s+(fabbrica|produzione)\b",
+    r"\bsiamo\s+(un\s+|una\s+)?(\w+\s+){0,2}(produttori?|fabbricanti?|azienda\s+produttrice)\b",
+    # English
+    r"\bwe\s+(design\s+and\s+|develop\s+and\s+)?(manufacture|produce|fabricate)\b", r"\bmanufacture\s+our\b",
+    r"\bour\s+(own\s+)?(factory|factories|manufacturing\s+(plant|facility|facilities|site))\b",
+    r"\b(we\s+are|is)\s+(a|an|the)\s+(\w+\s+){0,3}manufacturer\b", r"\bin-house\s+(production|manufacturing)\b",
+    # A heading that starts with "Factory of ..." / "Manufacturers of ..." (weakest, so last)
+    r"^(fabrica|fabricantes?|manufacturers?|hersteller|fabricant|produttori?)\s+(de|of|von|fur|di)\b",
+)]
+
+# They have the product made for them under their own brand: that is an OEM buyer, not a manufacturer.
+OEM_BUYER_CUES = [re.compile(p) for p in (
+    r"\bmandamos\s+(a\s+)?fabricar\b", r"\bencargamos\b[^.]{0,40}\bfabrica", r"\bfabricad[oa]s?\s+para\s+(nosotros|nos)\b",
+    r"\b(manufactured|made|produced)\s+for\s+us\b", r"\bhave\b[^.]{0,40}\b(made|manufactured|produced)\s+(under|to|for)\s+our\b",
+    r"\b(lassen|liessen)\b[^.]{0,60}\b(fertigen|herstellen|produzieren)\b", r"\bfur\s+uns\s+(gefertigt|hergestellt|produziert)\b",
+    r"\bfaisons\s+fabriquer\b", r"\bfabriques?\s+pour\s+nous\b", r"\bfacciamo\s+(produrre|fabbricare)\b",
+    r"\b(prodotti|fabbricati)\s+per\s+noi\b",
+)]
+
+
+def _plain(text: str) -> str:
+    """Lower case with every accent removed (also ã, ê, ü), for pattern matching in any language."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _sentences(text: str) -> list:
+    """Split page text into sentences and headings (line breaks, full stops, "|" separators in titles)."""
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", text or ""))   # in case raw HTML is passed in
+    parts = re.split(r"\n+|(?<=[.!?])\s+|\s\|\s", text)
+    return [re.sub(r"\s+", " ", p).strip() for p in parts if p and p.strip()]
+
+
+def maker_sentence(text: str, name: str = "", about_company_only: bool = False) -> str:
+    """The first sentence in which the page says the company makes things itself, or "".
+    about_company_only: the page is someone else's (a directory, a reseller), so only sentences
+    that name the company count. A sentence next to an OEM cue ("mandamos a fabricar ... bajo nuestra
+    marca", "made for us") is ignored: they have products made for them, so they are buyers."""
+    sentences = _sentences(text)
+    plain = [_plain(s) for s in sentences]
+    words = [_plain(w) for w in _name_words(name)] if name else []
+    for cue in MAKER_CUES:
+        for i, s in enumerate(plain):
+            if not cue.search(s):
+                continue
+            if about_company_only and not any(re.search(rf"\b{re.escape(w)}\b", s) for w in words):
+                continue
+            nearby = " ".join(plain[max(0, i - 1): i + 2])
+            if any(oem.search(nearby) for oem in OEM_BUYER_CUES):
+                continue
+            return sentences[i][:300]
+    return ""
+
+
+def flag_maker(company: dict, text: str, url: str, about_company_only: bool = False) -> bool:
+    """If the page says the company makes this itself, record the sentence in maker_flag.
+    A flagged company keeps its place in the list (the page may be wrong, or they may also import),
+    but it loses the trade_buyer point and the app does not count it as fully verified."""
+    if company.get("maker_flag") or not text:
+        return bool(company.get("maker_flag"))
+    sentence = maker_sentence(text, company.get("name", ""), about_company_only)
+    if not sentence:
+        return False
+    company["maker_flag"] = {"sentence": sentence, "url": url}
+    reasons = company.get("score_reasons")
+    if isinstance(reasons, list) and "trade_buyer" in reasons:
+        company["score_reasons"] = [r for r in reasons if r != "trade_buyer"]
+        company["fit_score"] = float(min(5, sum(p for k, p in RUBRIC if k in company["score_reasons"])))
+        company["intent"] = TIERS.get(round(company["fit_score"]), "Low / 低")
+    return True
+
+
+# ---------- Is a guessed website in the right country? (round 7) ----------
+# fajota.com was accepted for "Fajota Iberica SL" (Spain) because the name matched, but it is a
+# Portuguese manufacturer: Portuguese text, +351 phone number, postal code 3754-909 Águeda.
+GENERIC_TLDS = {"com", "net", "org", "eu", "info", "biz", "io", "co", "shop", "store", "online", "site", "global"}
+TLD_LANGS = {"es": {"es", "ca"}, "mx": {"es"}, "cl": {"es"}, "co": {"es"}, "pt": {"pt"}, "com.br": {"pt"},
+             "de": {"de"}, "fr": {"fr"}, "it": {"it"}, "co.uk": {"en"}, "in": {"en"}, "com.au": {"en"}}
+PHONE_CODES = {"es": "34", "pt": "351", "mx": "52", "de": "49", "fr": "33", "it": "39", "com.br": "55",
+               "co.uk": "44", "nl": "31", "pl": "48", "cl": "56", "co": "57", "in": "91", "sa": "966",
+               "com.tr": "90", "com.au": "61", "jp": "81", "vn": "84"}
+POSTAL_PATTERNS = {"pt": r"\b\d{4}-\d{3}\b", "com.br": r"\b\d{5}-\d{3}\b"}
+LANG_NAMES = {"es": "Spanish", "pt": "Portuguese", "de": "German", "fr": "French", "it": "Italian", "en": "English"}
+# Short words that appear in one language and not in its neighbours (no "la", "de", "a", "con", "una", "e")
+STOPWORDS = {
+    "es": {"el", "los", "las", "del", "y", "es", "al", "por", "nuestro", "nuestra", "nuestros", "su", "sus", "muy"},
+    "pt": {"o", "os", "do", "da", "dos", "das", "e", "com", "uma", "em", "na", "ao", "nao", "sao", "nossa", "nosso"},
+    "de": {"der", "die", "das", "und", "mit", "fur", "ist", "wir", "unsere", "ein", "eine", "von", "zu", "auf"},
+    "fr": {"le", "les", "des", "et", "avec", "pour", "est", "nous", "notre", "du", "sur", "dans", "vous"},
+    "it": {"il", "gli", "della", "delle", "per", "sono", "nostro", "nostra", "che", "di", "anche"},
+    "en": {"the", "and", "with", "for", "our", "we", "is", "of", "to", "you", "are"},
+}
+
+
+def _page_language(text: str) -> str:
+    """The language most of the page is written in, or "" if there is not enough text to tell."""
+    tokens = re.findall(r"[a-z]+", _plain(text))
+    counts = {lang: sum(1 for t in tokens if t in words) for lang, words in STOPWORDS.items()}
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    (top, n1), (_, n2) = ranked[0], ranked[1]
+    return top if n1 >= 15 and n1 >= 1.5 * n2 else ""
+
+
+def country_mismatch(url: str, text: str, country: str) -> str:
+    """Why a guessed website looks like a company in another country, or "" if nothing points that way.
+    Checks the domain ending, the page language and phone/postal codes in the address."""
+    target = COUNTRY_TLDS.get((country or "").strip().lower())
+    if not target:
+        return ""
+    host = urllib.parse.urlparse(url if "//" in url else "https://" + url).netloc.lower().split(":")[0]
+    reasons = []
+    known = set(COUNTRY_TLDS.values()) | {"uk", "br", "tr", "au", "at", "ch", "be", "ar", "pe", "cn", "us"}
+    suffix = next((t for t in sorted(known, key=len, reverse=True) if host.endswith("." + t)), "")
+    if suffix and suffix != target and suffix not in GENERIC_TLDS:
+        reasons.append(f"domain ends in .{suffix}")
+    lang = _page_language(text)
+    if lang and lang != "en" and target in TLD_LANGS and lang not in TLD_LANGS[target]:
+        reasons.append(f"page is in {LANG_NAMES[lang]}")
+    # Address: phone numbers and postal codes of another country, and none of the target country.
+    # One foreign phone number alone is not enough (a Spanish company can list its Italian branch),
+    # so it takes two foreign numbers, or a foreign number plus a foreign postal code.
+    found = re.findall(r"\+ ?(\d{2,3})\)?[ .\-]?\(?\d{2,}", text or "")
+    foreign = [code for code in found if code in PHONE_CODES.values() and code != PHONE_CODES.get(target)]
+    postal = [m.group() for tld, p in POSTAL_PATTERNS.items() if tld != target for m in [re.search(p, text or "")] if m]
+    if PHONE_CODES.get(target) not in found and len(foreign) + len(postal) >= 2 and foreign:
+        reasons.append("address " + ", ".join([f"+{c}" for c in dict.fromkeys(foreign)] + postal))
+    return "; ".join(reasons)
+
+
+def _mentions_company(text: str, name: str) -> bool:
+    """Check that the distinctive words of the company name appear in the page text.
     Used for guessed domains, so a parked page or another company is not accepted."""
     words = [w.translate(ACCENTS) for w in _name_words(name)]
-    text = _fetch_text(url)
+    text = _fold(text)
     if not words or not text:
         return False
     if any(p in text for p in ("domain is for sale", "dominio en venta", "buy this domain", "parked")):
@@ -462,10 +625,19 @@ def find_missing_websites(companies: list, country: str, usage: "Usage") -> list
                 company["website"] = site
                 return
         for url in _guess_domains(name, country):
-            if _page_mentions(url, name):
-                company["website"] = url
-                company["website_guessed"] = True
-                return
+            text = _fetch_text(url)
+            if not _mentions_company(text, name):
+                continue
+            # A matching name is not enough: the site must also look like it is in the target country
+            reason = country_mismatch(url, text, country)
+            if reason:
+                company.setdefault("websites_rejected", []).append(
+                    {"url": url, "reason": f"looks like a company outside {country}: {reason}"})
+                continue
+            company["website"] = url
+            company["website_guessed"] = True
+            flag_maker(company, text, url)
+            return
 
     with ThreadPoolExecutor(max_workers=5) as pool:
         list(pool.map(lookup, missing))
@@ -579,7 +751,8 @@ def _finish(companies, results, country, usage, progress) -> list:
     if missing:
         progress("websites", count=missing)
     companies = find_missing_websites(companies, country, usage)
-    return _dedupe_by_website(companies)
+    # A maker flag can lower a score, so sort again
+    return sorted(_dedupe_by_website(companies), key=_score, reverse=True)
 
 
 def _research_with_claude(seller, product, country, n, max_searches, usage, language="English"):
@@ -735,11 +908,25 @@ def check_website(url: str, timeout: int = 10) -> bool:
 
 
 def verify_websites(companies: list) -> list:
-    """Step 1b: open every website at the same time and mark the ones that work."""
+    """Step 1b: open every website at the same time, mark the ones that work, and check each homepage
+    for signs that the company makes this itself (see flag_maker)."""
     if not companies:
         return companies
+    def check(company):
+        site = company.get("website", "")
+        if site and not site.startswith("http"):
+            site = "https://" + site
+        # One request does both jobs: if the homepage text comes back, the site works and its text
+        # is checked for signs that the company makes this itself. Otherwise fall back to the plain check
+        # (it also accepts sites that block automated visits with 403 and similar).
+        text = _fetch_text(site) if site else ""
+        if text.strip():
+            flag_maker(company, text, site)
+            return True
+        return check_website(site)
+
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda c: check_website(c.get("website", "")), companies))
+        results = list(pool.map(check, companies))
     for company, ok in zip(companies, results):
         company["website_ok"] = ok
     # Best fit first; among equal scores, working websites first

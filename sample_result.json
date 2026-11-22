@@ -3,30 +3,6 @@
  "country": "Spain",
  "companies": [
   {
-   "uid": 0,
-   "name": "Fajota Iberica Sl",
-   "fit_score": 5.0,
-   "score_reasons": [
-    "sells_same_products",
-    "exact_products",
-    "trade_buyer",
-    "imports_or_same_material"
-   ],
-   "website": "https://fajota.com",
-   "website_ok": true,
-   "website_guessed": true,
-   "type": "distributor",
-   "city": "Navalcarnero, Community of Madrid",
-   "what_they_sell": "Distribution of stainless steel accessories and hardware for the cold and hospitality industry, including hinges and handles.",
-   "why_fit": "They specialize in stainless steel hardware distribution and stock hinges and handles, fitting the seller's material and category.",
-   "evidence": "Herrajes y accesorios (bisagras, patas, tiradores, ruedas, cremalleras, luminarias, etc)",
-   "evidence_level": "page",
-   "evidence_verified": true,
-   "next_step": "Use their published company contact to request a meeting about OEM stainless steel hinges and handles.",
-   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=Fajota%20Iberica%20Sl%20purchasing%20manager",
-   "source": "https://prospeo.io/c/fajota-iberica-sl-email-format#1"
-  },
-  {
    "uid": 1,
    "name": "Verdú (Joaquín Verdú Díaz, S.L.U.)",
    "fit_score": 5.0,
@@ -51,30 +27,6 @@
    "source": "https://construying.com/directorio/verdu/"
   },
   {
-   "uid": 2,
-   "name": "HERRAJES FERRAMOL, S.L.U.",
-   "fit_score": 5.0,
-   "score_reasons": [
-    "sells_same_products",
-    "exact_products",
-    "trade_buyer",
-    "imports_or_same_material"
-   ],
-   "website": "https://ferramol.com",
-   "website_ok": true,
-   "website_guessed": true,
-   "type": "distributor",
-   "city": "Spain (unspecified)",
-   "what_they_sell": "Design, manufacture and distribution of furniture hardware, especially handles, knobs and stainless steel sinks.",
-   "why_fit": "They distribute handles and knobs including stainless steel (inox), matching the seller's handle products.",
-   "evidence": "herrajes para muebles, especialmente tiradores, pomos, asas y fregaderos metálicos",
-   "evidence_level": "page",
-   "evidence_verified": true,
-   "next_step": "Contact them via the AECOC trade listing to propose OEM stainless steel handles and hinges.",
-   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=HERRAJES%20FERRAMOL%2C%20S.L.U.%20purchasing%20manager",
-   "source": "https://www.aecoctrade.es/en/empresa/l8q6Rch9U1oGu2hTxcilM7"
-  },
-  {
    "uid": 3,
    "name": "Emuca Group",
    "fit_score": 5.0,
@@ -97,6 +49,36 @@
    "next_step": "Approach their Valencia commercial HQ with an OEM proposal for stainless steel hinges, handles and slides.",
    "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=Emuca%20Group%20purchasing%20manager",
    "source": "https://rocketreach.co/emuca-group-profile_b45505adfc9068eb"
+  },
+  {
+   "uid": 0,
+   "name": "Fajota Iberica Sl",
+   "fit_score": 5.0,
+   "score_reasons": [
+    "sells_same_products",
+    "exact_products",
+    "trade_buyer",
+    "imports_or_same_material"
+   ],
+   "website": "",
+   "website_ok": false,
+   "website_guessed": false,
+   "type": "distributor",
+   "city": "Navalcarnero, Community of Madrid",
+   "what_they_sell": "Distribution of stainless steel accessories and hardware for the cold and hospitality industry, including hinges and handles.",
+   "why_fit": "They specialize in stainless steel hardware distribution and stock hinges and handles, fitting the seller's material and category.",
+   "evidence": "Herrajes y accesorios (bisagras, patas, tiradores, ruedas, cremalleras, luminarias, etc)",
+   "evidence_level": "page",
+   "evidence_verified": true,
+   "next_step": "Use their published company contact to request a meeting about OEM stainless steel hinges and handles.",
+   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=Fajota%20Iberica%20Sl%20purchasing%20manager",
+   "source": "https://prospeo.io/c/fajota-iberica-sl-email-format#1",
+   "websites_rejected": [
+    {
+     "url": "https://fajota.com",
+     "reason": "looks like a company outside Spain: page is in Portuguese; address +351, 3754-909"
+    }
+   ]
   },
   {
    "uid": 4,
@@ -147,6 +129,33 @@
    "source": "https://www.infojobs.net/distribuciones-almir-noroeste/em-i708548524536210661365234950500"
   },
   {
+   "uid": 2,
+   "name": "HERRAJES FERRAMOL, S.L.U.",
+   "fit_score": 4.0,
+   "score_reasons": [
+    "sells_same_products",
+    "exact_products",
+    "imports_or_same_material"
+   ],
+   "website": "https://ferramol.com",
+   "website_ok": true,
+   "website_guessed": true,
+   "type": "distributor",
+   "city": "Spain (unspecified)",
+   "what_they_sell": "Design, manufacture and distribution of furniture hardware, especially handles, knobs and stainless steel sinks.",
+   "why_fit": "They distribute handles and knobs including stainless steel (inox), matching the seller's handle products.",
+   "evidence": "herrajes para muebles, especialmente tiradores, pomos, asas y fregaderos metálicos",
+   "evidence_level": "page",
+   "evidence_verified": true,
+   "next_step": "Contact them via the AECOC trade listing to propose OEM stainless steel handles and hinges.",
+   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=HERRAJES%20FERRAMOL%2C%20S.L.U.%20purchasing%20manager",
+   "source": "https://www.aecoctrade.es/en/empresa/l8q6Rch9U1oGu2hTxcilM7",
+   "maker_flag": {
+    "sentence": "Diseñamos y fabricamos tiradores y pomos para cocina, baño y muebles de hogar.",
+    "url": "https://ferramol.com"
+   }
+  },
+  {
    "uid": 6,
    "name": "MICEL",
    "fit_score": 4.0,
@@ -168,29 +177,6 @@
    "next_step": "Send a product catalogue and OEM terms to their listed contact for hardware distribution.",
    "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=MICEL%20purchasing%20manager",
    "source": "https://brandfetch.com/micel.es"
-  },
-  {
-   "uid": 7,
-   "name": "INTHER",
-   "fit_score": 4.0,
-   "score_reasons": [
-    "sells_same_products",
-    "exact_products",
-    "trade_buyer"
-   ],
-   "website": "https://www.inther.es",
-   "website_ok": true,
-   "website_guessed": false,
-   "type": "distributor",
-   "city": "Málaga",
-   "what_they_sell": "Hardware for technical projects including locks, hinges, handles and sliding guide systems for kitchens and wardrobes.",
-   "why_fit": "They distribute hinges, handles and sliding systems for kitchens and wardrobes, matching the seller's hardware lines.",
-   "evidence": "comercializa productos como cerraduras, bisagras, cierrapuertas, manillas y sistemas de guías correderas",
-   "evidence_level": "page",
-   "evidence_verified": true,
-   "next_step": "Email their listed general contact to introduce your factory and request distributor purchasing details.",
-   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=INTHER%20purchasing%20manager",
-   "source": "https://www.herrajesandalucia.com/contenido/27-inther.html"
   },
   {
    "uid": 8,
@@ -237,6 +223,32 @@
    "next_step": "Call their listed shop line to request the buyer's contact for OEM hardware supply.",
    "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=Coalfe%20Herrajes%20para%20Muebles%20S.L.%20purchasing%20manager",
    "source": "https://tuferreteria.one/sevilla/alcal%C3%A1-de-guada%C3%ADra/coalfe-herrajes-para-muebles-s-l/"
+  },
+  {
+   "uid": 7,
+   "name": "INTHER",
+   "fit_score": 3.0,
+   "score_reasons": [
+    "sells_same_products",
+    "exact_products"
+   ],
+   "website": "https://www.inther.es",
+   "website_ok": true,
+   "website_guessed": false,
+   "type": "distributor",
+   "city": "Málaga",
+   "what_they_sell": "Hardware for technical projects including locks, hinges, handles and sliding guide systems for kitchens and wardrobes.",
+   "why_fit": "They distribute hinges, handles and sliding systems for kitchens and wardrobes, matching the seller's hardware lines.",
+   "evidence": "comercializa productos como cerraduras, bisagras, cierrapuertas, manillas y sistemas de guías correderas",
+   "evidence_level": "page",
+   "evidence_verified": true,
+   "next_step": "Email their listed general contact to introduce your factory and request distributor purchasing details.",
+   "linkedin_search": "https://www.linkedin.com/search/results/people/?keywords=INTHER%20purchasing%20manager",
+   "source": "https://www.herrajesandalucia.com/contenido/27-inther.html",
+   "maker_flag": {
+    "sentence": "We use top quality materials to manufacture our fittings.",
+    "url": "https://www.inther.es"
+   }
   }
  ],
  "drafts": [
@@ -262,5 +274,14 @@
   "input_tokens": 0,
   "output_tokens": 0
  },
- "note": "Real search made on 2026-11-21 with Buyer Finder (DeepSeek), round 6. Exported from the app; cost was not recorded."
+ "note": "Real search made on 2026-11-21 with Buyer Finder (DeepSeek), round 6. Exported from the app; cost was not recorded. Round 7 (2026-11-22): the manufacturer check and the guessed-website country check were applied afterwards to page text fetched on 2026-11-22; nothing else was changed.",
+ "summary": {
+  "companies": 10,
+  "fully_verified": 4,
+  "website_confirmed": 6,
+  "website_matched_by_name_only": 1,
+  "possible_manufacturers": 2,
+  "evidence_checked": 10,
+  "evidence_on_page": 6
+ }
 }

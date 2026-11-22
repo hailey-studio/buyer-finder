@@ -162,3 +162,91 @@ def test_U7_language_reaches_the_prompt(monkeypatch):
     calls = fake_client("<json>[]</json>")
     bf.research_buyers("s", "hinges", "Spain", usage=bf.Usage(), language="Simplified Chinese")
     assert "in Simplified Chinese" in calls[-1]["messages"][0]["content"]
+
+
+# ---------- Round 7: an evaluation found 2 false buyers in the published sample ----------
+FERRAMOL_PAGE = ("<title>Fabrica de tiradores y pomos para muebles | Ferramol</title>"
+                 "<p>FERRAMOL, desde 1979, diseña y fabrica tiradores y pomos.</p>"
+                 "<p>Teléfono: +34 962 490 388</p>")
+VERDU_PAGE = ("<h2>Somos fabricantes</h2>"
+              "<p>Elaboramos nuestros propios diseños y mandamos a fabricar herrajes para muebles bajo nuestra marca.</p>"
+              "<p>Distribuimos bisagras, tiradores y sistemas correderos.</p>")
+FAJOTA_PT_PAGE = (
+    "<p>Fundada em 1978, a Fajota dispõe actualmente de uma área coberta de 6.000 m2 e mais de 45 colaboradores "
+    "e dedica-se desde 1988 ao fabrico de componentes para a indústria de frio, desde a sua concepção, produção "
+    "e expedição. A Fajota tem como missão responder às necessidades dos seus clientes, fornecendo produtos que "
+    "vão ao encontro dos seus requisitos. É hoje possível encontrar os produtos da Fajota em países como Espanha, "
+    "França e Brasil. Dobradiças, puxadores e fechos para a indústria do frio com uma produção versátil.</p>"
+    "<p>Zona Industrial de Assequins, Ap. 163 * 3754-909 Águeda | Portugal</p>"
+    "<p>T +351 234 612 700</p><p>F +351 234 612 701</p>")
+FULL_SCORE = {"sells_same_products": True, "exact_products": True, "trade_buyer": True, "imports_or_same_material": True}
+
+
+def test_R7_manufacturer_sentence_is_flagged(monkeypatch):
+    """Herrajes Ferramol was typed "distributor" and scored 5/5, but its homepage says it makes handles."""
+    no_network(monkeypatch, {"https://ferramol.com": FERRAMOL_PAGE})
+    monkeypatch.setattr(bf, "check_website", lambda url, timeout=10: True)
+    c = bf._clean([{"name": "HERRAJES FERRAMOL, S.L.U.", "website": "https://ferramol.com", "type": "distributor",
+                    **FULL_SCORE}])[0]
+    assert c["fit_score"] == 5.0
+    bf.verify_websites([c])
+    assert c["website_ok"] is True
+    assert c["maker_flag"]["sentence"] == "FERRAMOL, desde 1979, diseña y fabrica tiradores y pomos."
+    assert c["maker_flag"]["url"] == "https://ferramol.com"
+    assert "trade_buyer" not in c["score_reasons"] and c["fit_score"] == 4.0
+
+
+def test_R7_oem_buyer_is_not_flagged(monkeypatch):
+    """Verdú has hardware made for it under its own brand: that is a buyer for an OEM factory."""
+    assert bf.maker_sentence("Elaboramos nuestros propios diseños y mandamos a fabricar herrajes "
+                             "para muebles bajo nuestra marca.") == ""
+    no_network(monkeypatch, {"https://verduonlinestore.com": VERDU_PAGE})
+    monkeypatch.setattr(bf, "check_website", lambda url, timeout=10: True)
+    c = bf._clean([{"name": "Verdú (Joaquín Verdú Díaz, S.L.U.)", "website": "https://verduonlinestore.com",
+                    **FULL_SCORE}])[0]
+    bf.verify_websites([c])
+    assert "maker_flag" not in c and c["fit_score"] == 5.0
+
+
+def test_R7_other_false_positives_are_not_flagged():
+    for text in ("Somos distribuidor de fabricantes líderes como Blum y Hettich.",
+                 "Tiradores y pomos para fabricantes de muebles y carpinteros.",
+                 "Hinges manufactured for us in Asia and sold under our brand.",
+                 "We have our hinges made under our own brand.",
+                 "Wir lassen unsere Scharniere in Asien fertigen.",
+                 "Condena fabricada en acero inoxidable."):
+        assert bf.maker_sentence(text) == "", text
+    for text in ("Fabricamos bisagras desde 1985.", "We manufacture drawer slides.", "Wir fertigen Scharniere.",
+                 "Nous fabriquons des charnières.", "Fabbrichiamo cerniere dal 1970.", "Fabricamos dobradiças."):
+        assert bf.maker_sentence(text) == text, text
+
+
+def test_R7_third_party_page_only_counts_sentences_about_the_company(monkeypatch):
+    """A directory page that says another company manufactures must not flag this one."""
+    page = "<p>Verdú distribuye herrajes para muebles.</p><p>833 Solar diseña y fabrica estructuras.</p>"
+    no_network(monkeypatch, {"https://dir.example/verdu": page})
+    cs = [{"name": "Verdú", "source": "https://dir.example/verdu", "evidence": "Verdú distribuye herrajes para muebles"}]
+    bf._check_evidence(cs, [])
+    assert cs[0]["evidence_level"] == "page" and "maker_flag" not in cs[0]
+
+
+def test_R7_guessed_site_in_another_country_is_rejected(monkeypatch):
+    """Fajota Iberica SL (Spain) was linked to fajota.com, a Portuguese manufacturer in Águeda."""
+    no_network(monkeypatch, {"https://fajota.com": FAJOTA_PT_PAGE})
+    monkeypatch.setattr(bf, "web_search", lambda q: [])
+    c = {"name": "Fajota Iberica Sl", "website": ""}
+    bf.find_missing_websites([c], "Spain", bf.Usage())
+    assert c["website"] == "" and not c.get("website_guessed")
+    rejected = c["websites_rejected"][0]
+    assert rejected["url"] == "https://fajota.com" and "Portuguese" in rejected["reason"] and "+351" in rejected["reason"]
+    assert "maker_flag" not in c          # the page is not theirs, so it says nothing about them
+
+
+def test_R7_guessed_site_by_ccTLD_is_rejected_and_right_country_is_kept(monkeypatch):
+    assert "domain ends in .pt" in bf.country_mismatch("https://fajota.pt", "Fajota", "Spain")
+    assert bf.country_mismatch("https://ferramol.com", FERRAMOL_PAGE, "Spain") == ""
+    no_network(monkeypatch, {"https://ferramol.com": FERRAMOL_PAGE})
+    monkeypatch.setattr(bf, "web_search", lambda q: [])
+    c = {"name": "HERRAJES FERRAMOL, S.L.U.", "website": ""}
+    bf.find_missing_websites([c], "Spain", bf.Usage())
+    assert c["website"] == "https://ferramol.com" and c["website_guessed"] and c["maker_flag"]

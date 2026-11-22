@@ -22,9 +22,9 @@ So I wanted to use AI to speed this up.
 ## How it works
 
 1. **Search.** Three web searches for importers, distributors and wholesalers of your product in the target market. Product and country are translated to English first, so a search typed in Chinese still finds local companies.
-2. **Filter.** Manufacturers, B2B marketplaces, directories, social media and job sites are removed. A company is kept only if its source really is one of the search results, so the AI can't invent one.
+2. **Filter.** Manufacturers, B2B marketplaces, directories, social media and job sites are removed. A company is kept only if its source really is one of the search results, so the AI can't invent one. If a company's own page says it makes the product itself ("fabricamos", "we manufacture", in six languages), it is marked as a possible competitor instead of being counted as a buyer.
 3. **Check the evidence.** For every company the AI must quote the source word for word. The app then opens the source page and looks for that quote. Each company shows whether the quote was found on the page, only in the search summary, or not at all.
-4. **Confirm the website.** If the AI gives no website, the app searches for it and only accepts a domain built from the company's own name. Sites found by guessing the name are labelled as such.
+4. **Confirm the website.** If the AI gives no website, the app searches for it and only accepts a domain built from the company's own name. Sites found by guessing the name are labelled as such, and are dropped if the page points to another country (domain ending, page language, phone and postal codes).
 5. **Score.** The AI answers four yes/no questions (sells this category, sells your exact products, buys in bulk, already imports or uses the same material) and the app adds up the points. The same answers always give the same score, and every score shows its reasons.
 6. **Draft.** Short first emails for the best matches with a confirmed website, in English or the buyer's language. Buyer Finder never sends anything: you read the drafts and decide.
 
@@ -36,8 +36,8 @@ Same test every round: stainless steel kitchen hardware for Spain, 10 companies.
 
 | Metric | First version | Latest |
 |---|---|---|
-| Fully verified buyers (evidence checked and website confirmed) | about 1 | 5 |
-| Official website confirmed | 30% | 70% |
+| Fully verified buyers (evidence checked, website confirmed, not flagged as a possible manufacturer) | about 1 | 4 |
+| Official website confirmed | 30% | 60% |
 | Quotes checked | 80% (search summary only) | 100% (6 on the page itself) |
 | Cost per search | about US$0.01 | about US$0.01 |
 
@@ -76,7 +76,7 @@ APP_PASSWORD = "choose-a-password"
 
 ## Tests
 
-29 automated tests, one or more for every issue found in review (logic bugs, trust issues and usability problems). They replace every network call, so they run without an API key:
+35 automated tests, one or more for every issue found in review (logic bugs, trust issues and usability problems). They replace every network call, so they run without an API key:
 
 ```bash
 pip install -r requirements-dev.txt
